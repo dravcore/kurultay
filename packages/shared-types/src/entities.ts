@@ -51,6 +51,12 @@ export interface UserDto {
    * apart (docs/decisions/0018-localization-strategy.md).
    */
   locale: Locale | null;
+  /**
+   * Whether assignment, mention and due-soon notifications are also emailed. One switch for
+   * every kind; `true` for a new account. Has no effect on an instance without SMTP
+   * (`InstanceConfigDto.mailEnabled`).
+   */
+  emailNotifications: boolean;
   createdAt: string;
 }
 
@@ -156,6 +162,27 @@ export const AttachmentKind = {
 } as const;
 
 export type AttachmentKind = (typeof AttachmentKind)[keyof typeof AttachmentKind];
+
+/**
+ * The `error` field of the 413 an upload answers when a storage quota would be exceeded
+ * (ADR 0027).
+ *
+ * The per-file size limit answers 413 too, so the status code alone cannot say which ceiling
+ * was hit — and `docs/api-conventions.md#errors` tells clients to branch on `statusCode` and
+ * `error`, never on `message`. This string is that branch, shared so the API that writes it and
+ * the web that reads it cannot drift.
+ */
+export const ATTACHMENT_QUOTA_ERROR = 'Attachment Quota Exceeded';
+
+/**
+ * The `error` field of the 429 the upload route answers when a client IP has submitted more
+ * bytes in the current minute than `ATTACHMENT_UPLOAD_BYTES_PER_MINUTE` allows.
+ *
+ * The per-route request throttle answers 429 too, with the stock `"Too Many Requests"`; the
+ * two ask for different waits (the budget's `Retry-After` is the rest of a fixed minute), and
+ * clients branch on `statusCode` and `error`, never on `message`.
+ */
+export const UPLOAD_BUDGET_ERROR = 'Upload Budget Exceeded';
 
 /**
  * One attachment on a task.

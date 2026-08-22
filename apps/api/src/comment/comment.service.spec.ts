@@ -1,6 +1,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { MemberRole } from '@kurul/shared-types';
 import { ActivityService } from '../activity/activity.service';
+import { NotificationMailer } from '../notification/notification-mailer';
 import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -44,6 +45,7 @@ describe('CommentService', () => {
       emitUnreadChanged: jest.fn(),
     };
     const realtime = { emitToBoard: jest.fn() };
+    const notificationMailer = { sendForCreated: jest.fn().mockResolvedValue(undefined) };
 
     return {
       service: new CommentService(
@@ -51,9 +53,11 @@ describe('CommentService', () => {
         activityService as unknown as ActivityService,
         notificationService as unknown as NotificationService,
         realtime as unknown as RealtimeService,
+        notificationMailer as unknown as NotificationMailer,
       ),
       prisma,
       notificationService,
+      notificationMailer,
     };
   }
 
@@ -191,7 +195,7 @@ describe('CommentService', () => {
   });
 
   it('signals the mentioned users once, after the transaction has committed', async () => {
-    const { service, prisma, notificationService } = buildService();
+    const { service, prisma, notificationService, notificationMailer } = buildService();
     const body = `hey @[Bob](${MENTIONED_ID}) and @[Bob](${MENTIONED_ID})`;
     prisma.comment.create.mockResolvedValue({
       id: COMMENT_ID,
@@ -219,10 +223,20 @@ describe('CommentService', () => {
     expect(notificationService.emitUnreadChanged).toHaveBeenCalledWith(WORKSPACE_ID, [
       MENTIONED_ID,
     ]);
+    // The email is the other half of the same post-commit step, one per mentioned member.
+    expect(notificationMailer.sendForCreated).toHaveBeenCalledWith([
+      {
+        workspaceId: WORKSPACE_ID,
+        userId: MENTIONED_ID,
+        actorId: AUTHOR_ID,
+        type: 'mention',
+        taskId: TASK_ID,
+      },
+    ]);
   });
 
   it('skips the notification batch call when a comment has no mentions', async () => {
-    const { service, prisma, notificationService } = buildService();
+    const { service, prisma, notificationService, notificationMailer } = buildService();
     prisma.comment.create.mockResolvedValue({
       id: COMMENT_ID,
       taskId: TASK_ID,
@@ -237,6 +251,7 @@ describe('CommentService', () => {
     expect(prisma.workspaceMember.findMany).not.toHaveBeenCalled();
     expect(notificationService.createMentionBatch).not.toHaveBeenCalled();
     expect(notificationService.emitUnreadChanged).not.toHaveBeenCalled();
+    expect(notificationMailer.sendForCreated).not.toHaveBeenCalled();
   });
 
   it('allows the author to delete their comment', async () => {

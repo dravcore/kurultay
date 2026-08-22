@@ -51,9 +51,19 @@ describe('Activation funnel (e2e)', () => {
     delete process.env[INSTANCE_ADMIN_EMAILS_ENV];
   });
 
-  /** Makes `user` the instance operator for the rest of the current test. */
-  function asInstanceAdmin(user: TestUser): void {
+  /**
+   * Makes `user` the instance operator for the rest of the current test.
+   *
+   * `InstanceAdminGuard` requires `emailVerified` as well as list membership (a real operator's
+   * account has been through mailbox verification), so listing the address is not enough on its
+   * own — `confirmEmail` also re-signs the agent in so its session cookie agrees with the
+   * database (see its doc comment). The guard's own unit spec covers the denial half of this
+   * (`refuses a listed address whose email is not yet verified`); every e2e admin fixture here
+   * models the state a real operator is actually in.
+   */
+  async function asInstanceAdmin(user: TestUser): Promise<void> {
     process.env[INSTANCE_ADMIN_EMAILS_ENV] = user.email;
+    await confirmEmail(app, prisma, user);
   }
 
   async function funnel(user: TestUser): Promise<ActivationFunnelDto> {
@@ -114,7 +124,7 @@ describe('Activation funnel (e2e)', () => {
     const operator = await signUp(app);
     const owner = await signUp(app);
     await createWorkspace(owner.agent, 'Not yours', 'notyours');
-    asInstanceAdmin(operator);
+    await asInstanceAdmin(operator);
 
     await owner.agent.get('/instance/activation').expect(403);
     await operator.agent.get('/instance/activation').expect(200);
@@ -136,7 +146,7 @@ describe('Activation funnel (e2e)', () => {
    */
   it('counts all eleven steps from what onboarding already writes', async () => {
     const operator = await signUp(app, { name: 'Operator' });
-    asInstanceAdmin(operator);
+    await asInstanceAdmin(operator);
 
     // --- user_registered ---------------------------------------------------------------
     const founder = await signUp(app, { name: 'Founder' });
@@ -258,7 +268,7 @@ describe('Activation funnel (e2e)', () => {
    */
   it('counts distinct people, never events', async () => {
     const operator = await signUp(app);
-    asInstanceAdmin(operator);
+    await asInstanceAdmin(operator);
     const founder = await signUp(app);
     const workspace = await createWorkspace(founder.agent, 'Busy', 'busy');
 
@@ -350,7 +360,7 @@ describe('Activation funnel (e2e)', () => {
    */
   it('counts a workspace as a weekly active team only when two of its members were active', async () => {
     const operator = await signUp(app);
-    asInstanceAdmin(operator);
+    await asInstanceAdmin(operator);
 
     const alone = await signUp(app);
     const soloWorkspace = await createWorkspace(alone.agent, 'Solo', 'solo');
@@ -416,7 +426,7 @@ describe('Activation funnel (e2e)', () => {
    */
   it('drops a team out of the weekly count once its traces age past the window', async () => {
     const operator = await signUp(app);
-    asInstanceAdmin(operator);
+    await asInstanceAdmin(operator);
     const lead = await signUp(app);
     const workspace = await createWorkspace(lead.agent, 'Stale', 'stale');
     const engineer = await signUp(app);
@@ -458,7 +468,7 @@ describe('Activation funnel (e2e)', () => {
    */
   it('ignores traces left by people who are no longer members', async () => {
     const operator = await signUp(app);
-    asInstanceAdmin(operator);
+    await asInstanceAdmin(operator);
     const lead = await signUp(app);
     const workspace = await createWorkspace(lead.agent, 'Departed', 'departed');
     const quiet = await signUp(app);
@@ -498,7 +508,7 @@ describe('Activation funnel (e2e)', () => {
    */
   it('returns every declared step exactly once, in the declared order, with its unit', async () => {
     const operator = await signUp(app);
-    asInstanceAdmin(operator);
+    await asInstanceAdmin(operator);
 
     const dto = await funnel(operator);
 

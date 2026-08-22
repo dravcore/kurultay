@@ -4,10 +4,10 @@ How to report a vulnerability in Kurul.
 
 ## Supported versions
 
-Kurul is pre-release — there is no stable version yet and no version support matrix.
-All security fixes land on `main`/latest until a first stable release exists; this file
-will gain a supported-versions table at that point. After the first release, fixes follow
-`hotfix/*` per [docs/git-strategy.md](docs/git-strategy.md).
+Kurul is pre-1.0: only the latest `0.y` release receives security fixes. There is no
+support matrix beyond that — upgrade to the latest release to stay covered. Fixes for a
+released version ship via `hotfix/*` per [docs/git-strategy.md](docs/git-strategy.md);
+fixes not yet released land on `develop`/`main` directly.
 
 ## Reporting a vulnerability
 

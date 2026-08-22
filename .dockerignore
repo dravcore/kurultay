@@ -9,3 +9,6 @@ coverage
 apps/api/src/generated
 apps/web/.next
 **/*.tsbuildinfo
+audit/
+.pnpm-store
+e2e/test-results

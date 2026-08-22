@@ -19,7 +19,7 @@ describe('sessionCookieNames', () => {
 
   it('includes the session_data cache, not only the token', () => {
     // The one that actually matters for account deletion: `session_data` is what
-    // `auth.api.getSession` answers from for five minutes without a database read, so a list
+    // `auth.api.getSession` answers from for 60 seconds without a database read, so a list
     // that only expired the token would leave a deleted account signed in.
     expect(sessionCookieNames().filter((name) => name.includes('session_data'))).toHaveLength(2);
   });

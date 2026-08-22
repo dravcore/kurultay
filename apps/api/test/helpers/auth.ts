@@ -86,8 +86,8 @@ export async function signIn(
  * (`requireEmailVerificationOnInvitation` in `src/auth/organization-options.ts`), so every
  * e2e that walks the invite flow has to put its invitee in that state.
  *
- * Flipping the column is not enough on its own: the session cookie caches the user for five
- * minutes (`session.cookieCache`), so the agent would keep presenting `emailVerified: false`
+ * Flipping the column is not enough on its own: the session cookie caches the user for 60
+ * seconds (`session.cookieCache`), so the agent would keep presenting `emailVerified: false`
  * from the cookie it already holds. Signing in again mints a cookie that agrees with the
  * database. The user's `agent` is replaced in place, so callers keep using `user.agent`.
  *

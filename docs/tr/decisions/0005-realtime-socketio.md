@@ -21,7 +21,7 @@ Bare `ws` ve yönetilen realtime servisleri (Ably, Pusher, Liveblocks) yerine, *
 - **Uyumluluk bilinen-iyi durumdayken erken entegre et.** `@socket.io/redis-adapter` küçük ve özellik açısından tam ama yavaş ilerliyor — son sürümü Mart 2024'te çıktı. Mevcut socket.io 4.8.x hattıyla uyumluluğunun bugün çalıştığı biliniyor; uyumsuzluğu daha sonra, ölçeklendirme baskısı altında keşfetmek, aynı işin pahalı versiyonu.
 - Bare `ws`'in overhead'i daha düşük ama oda yönetimini ve otomatik yeniden bağlanmayı elle inşa etmeyi bırakıyor — ikisi de zaten bir kanban board'unun çok-client senaryosu için gerekli, dolayısıyla tasarruf gerçekleşmiyor.
 - Yönetilen servisler (Ably, Pusher, Liveblocks) serverless deployment'lara özgü sorunları çözüyor; kendi sunucu altyapımızı uçtan uca işlettiğimiz için burada geçerli değiller.
-- **Bilinçli sıralama:** realtime, özellik sırasında son sıraya konuyor (bkz. [project-skeleton.md](../project-skeleton.md)) — auth, board'lar, task'lar, task metadata'sı, filtreleme ve dashboard'lardan sonra — çünkü veri akışının önce oturması gerekiyor. Socket'leri erken bağlamak, sonraki her özellik değişikliğinde event kontratlarını güncellemek anlamına gelirdi.
+- **Bilinçli sıralama:** realtime, özellik sırasında son sıraya konuyor (bkz. Faz 1 proje iskeleti, artık yalnızca git geçmişinde) — auth, board'lar, task'lar, task metadata'sı, filtreleme ve dashboard'lardan sonra — çünkü veri akışının önce oturması gerekiyor. Socket'leri erken bağlamak, sonraki her özellik değişikliğinde event kontratlarını güncellemek anlamına gelirdi.
 
 ## Sonuçlar
 

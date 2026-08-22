@@ -3,11 +3,20 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+const packagesDir = path.resolve(rootDir, '../../packages');
 
 export default defineConfig({
   resolve: {
     alias: {
       '@': rootDir,
+      // The workspace packages resolve through `package.json` `exports` to a git-ignored
+      // `dist/`, so without these two entries the suite needs a build first and, worse, keeps
+      // passing against a stale one. Pointing them at `src/index.ts` makes Vitest compile the
+      // same source `pnpm typecheck` reads. The sources' `.js`-suffixed relative imports
+      // (`export * from './enums.js'`) need nothing extra: Vite already resolves them to the
+      // `.ts` file. `workspace-packages.test.ts` asserts the alias holds.
+      '@kurul/shared-types': path.join(packagesDir, 'shared-types/src/index.ts'),
+      '@kurul/auth-access': path.join(packagesDir, 'auth-access/src/index.ts'),
     },
   },
   esbuild: {

@@ -1,3 +1,4 @@
+import { escapeLikePattern } from '../common/escape-like';
 import type { Prisma } from '../generated/prisma';
 import type { TaskQueryDto } from './dto/task-query.dto';
 
@@ -22,10 +23,16 @@ export function buildListWhere(boardId: string, query: TaskQueryDto): Prisma.Tas
   }
 
   if (query.q) {
+    // `contains` is not a literal-string match: Prisma passes `q` straight through to Postgres
+    // as an `ILIKE` pattern, so an unescaped `%`/`_` the user typed keeps its SQL wildcard
+    // meaning and silently widens the results (empirically confirmed against Postgres 18 — see
+    // `escapeLikePattern`'s doc comment). Escaping makes the search box match what it looks
+    // like it matches.
+    const q = escapeLikePattern(query.q);
     and.push({
       OR: [
-        { title: { contains: query.q, mode: 'insensitive' } },
-        { description: { contains: query.q, mode: 'insensitive' } },
+        { title: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
       ],
     });
   }

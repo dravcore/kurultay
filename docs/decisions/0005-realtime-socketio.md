@@ -47,7 +47,7 @@ managed realtime services (Ably, Pusher, Liveblocks).
   serverless deployments; they don't apply here since we operate our own
   server infrastructure end to end.
 - **Deliberate sequencing:** realtime is placed last in the feature order (see
-  [project-skeleton.md](../project-skeleton.md)) — after auth, boards, tasks,
+  the Phase 1 project skeleton, now only in git history) — after auth, boards, tasks,
   task metadata, filtering, and dashboards — because the data flow needs to
   settle first. Wiring sockets in early would mean updating event contracts on
   every subsequent feature change.

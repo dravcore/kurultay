@@ -14,8 +14,8 @@ semantics. Building both in one pass would touch board DnD as much as the task p
 scheduled window for this item is six days. A data model that quietly tried to serve both would
 under-serve the one this window can actually ship.
 
-The competitive pressure is specific, not general. `docs/roadmap.md`'s Beyond MVP section and
-the audit that scheduled Phase 3 agree on the same three questions a team asks before migrating
+The competitive pressure is specific, not general. [ROADMAP.md](../../ROADMAP.md)'s Beyond MVP
+section and the audit that scheduled Phase 3 agree on the same three questions a team asks before migrating
 a board off Trello: can I bring my boards, can I put files on cards, do I have checklists. The
 next item on the same roadmap, Trello import, answers the first question — and a Trello board's
 checklist is itself multi-list: a card can carry several named checklists, each with its own
@@ -36,10 +36,10 @@ card — main-thread busy time 34.1%, zero long tasks, 2.6 ms per pointer-move f
 nodes. A checklist model that pulls full item rows into the list query undoes that work by
 construction, before a single checklist even has ten items.
 
-This same decision was going to be made twice regardless: `docs/phase-3-plan.md` §4.1b already
-notes that attachments (P3-1) needs the same realtime call — new event type, or ride
-`task:updated` — and defers it to whichever of the two ships the decision first. This ADR is
-that first decision.
+This same decision was going to be made twice regardless: the phase-3 plan (now folded into
+[ROADMAP.md](../../ROADMAP.md)) already noted that attachments (P3-1) needs the same realtime
+call — new event type, or ride `task:updated` — and deferred it to whichever of the two ships the
+decision first. This ADR is that first decision.
 
 ## Decision
 

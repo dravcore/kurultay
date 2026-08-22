@@ -2,7 +2,7 @@
  * The cookies Better Auth uses to carry a session, under every name it can give them.
  *
  * There are two cookies, not one, and the second is the reason this file exists.
- * `better-auth.session_token` is the credential; `better-auth.session_data` is the five-minute
+ * `better-auth.session_token` is the credential; `better-auth.session_data` is the 60-second
  * signed cache that `auth.api.getSession` answers from **without consulting the database**
  * (`session.cookieCache` in `auth.ts`). Deleting a user's `Session` rows therefore does not stop
  * their browser presenting a valid session until that cache expires — clearing both cookies is

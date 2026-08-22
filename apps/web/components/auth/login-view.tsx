@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState, type FormEvent } from 'react';
 import { AuthFormField } from '@/components/auth/auth-form-field';
+import { SubmitError } from '@/components/common/submit-error';
 import { Button } from '@/components/ui/button';
 import { AFTER_LOGIN_PATH, NEXT_PARAM, safeNextPath, withNextParam } from '@/lib/auth-redirect';
 import { authClient } from '@/lib/auth';
@@ -75,7 +76,7 @@ export function LoginView(): React.ReactElement {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        {error ? <p className="text-body text-destructive">{error}</p> : null}
+        {error ? <SubmitError message={error} /> : null}
         <Button type="submit" disabled={pending}>
           {t('submit')}
         </Button>

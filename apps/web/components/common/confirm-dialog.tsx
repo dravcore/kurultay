@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { SubmitError } from '@/components/common/submit-error';
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -94,7 +95,7 @@ function ConfirmDialogBody({
         <DialogTitle>{title}</DialogTitle>
         {description ? <DialogDescription>{description}</DialogDescription> : null}
       </DialogHeader>
-      {error ? <p className="text-body text-destructive">{error}</p> : null}
+      {error ? <SubmitError message={error} /> : null}
       <DialogFooter>
         <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
           {cancelLabel}

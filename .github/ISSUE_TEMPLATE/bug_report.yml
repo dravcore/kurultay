@@ -5,16 +5,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Please describe the problem rather than pasting a fix.**
+        **Logs, error messages, stack traces and screenshots are exactly what we need.**
 
-        Logs, error messages, stack traces and screenshots are exactly what we need — paste
-        as many as you like. But please keep **your own patches and code snippets out of the
-        thread**: a diff is your copyrighted work, and while the Contributor License Agreement
-        is still in draft the maintainer cannot safely read one and then write the fix.
-        Pointing at a file and line and explaining what you think is wrong is better than a
-        diff, and it is not a smaller contribution.
+        Paste as many as you like. If you already have a fix in mind, say so: a pull request
+        is welcome once the bug is confirmed here, and pointing at the file and line you think
+        is wrong is useful on its own. Kurul is issue-first, so the report comes before the PR.
 
-        See [CONTRIBUTING.md](https://github.com/dravcore/kurul/blob/develop/CONTRIBUTING.md#code-contributions-are-paused).
+        See [CONTRIBUTING.md](https://github.com/dravcore/kurul/blob/develop/CONTRIBUTING.md).
 
   - type: checkboxes
     id: existing-issue

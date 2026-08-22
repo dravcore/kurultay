@@ -86,6 +86,17 @@ describe('FormDialog', () => {
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Q3 plan');
   });
 
+  it('announces the failure to assistive tech and moves focus to it', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error('boom'));
+    renderDialog({ onSubmit });
+
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/failed: Error: boom/);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
   it('re-enables the submit button after a failure', async () => {
     const onSubmit = vi.fn().mockRejectedValue(new Error('boom'));
     renderDialog({ onSubmit });

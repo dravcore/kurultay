@@ -30,6 +30,8 @@ export interface UpdateMeRequest {
    * browser's `Accept-Language`", which is a real choice and not the same as picking English.
    */
   locale?: Locale | null;
+  /** Omit to leave unchanged. `false` stops notification email; in-app notifications stay. */
+  emailNotifications?: boolean;
 }
 
 /** `POST /workspaces/:workspaceId/boards/:boardId/tasks` */

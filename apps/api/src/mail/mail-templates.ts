@@ -92,6 +92,35 @@ interface MailCopy {
     note: string;
     closing: string;
   };
+  /**
+   * Closes every notification email: why it arrived and where it is switched off. One sentence
+   * shared by the three kinds, so the opt-out is described the same way whichever one a person
+   * happens to open.
+   */
+  notificationFooter: string;
+  assignment: {
+    subject: (title: string) => string;
+    heading: string;
+    /** Used when the assigning member's display name is known. */
+    lead: (actorName: string, title: string, workspaceName: string) => string;
+    /** Used when it is not, so the sentence never starts with a blank. */
+    leadAnonymous: (title: string, workspaceName: string) => string;
+    action: string;
+  };
+  mention: {
+    subject: (title: string) => string;
+    heading: string;
+    lead: (actorName: string, title: string, workspaceName: string) => string;
+    leadAnonymous: (title: string, workspaceName: string) => string;
+    action: string;
+  };
+  dueSoon: {
+    subject: (title: string) => string;
+    heading: string;
+    /** `dueDate` arrives already formatted for the locale; see `formatDueDate`. */
+    lead: (title: string, workspaceName: string, dueDate: string) => string;
+    action: string;
+  };
 }
 
 /**
@@ -133,6 +162,32 @@ const MAIL_COPY: Record<Locale, MailCopy> = {
       note: 'Sign in with this email address and confirm it first — an invitation can only be accepted from a confirmed address.',
       closing: 'If you were not expecting this invitation, you can ignore this email.',
     },
+    notificationFooter: `You receive this email because notification email is switched on for your ${PRODUCT_NAME} account. You can turn it off under Settings.`,
+    assignment: {
+      subject: (title) => `You were assigned to "${title}"`,
+      heading: 'You have a new assignment',
+      lead: (actorName, title, workspaceName) =>
+        `${actorName} assigned you to the card "${title}" in the workspace "${workspaceName}".`,
+      leadAnonymous: (title, workspaceName) =>
+        `You were assigned to the card "${title}" in the workspace "${workspaceName}".`,
+      action: 'Open the card',
+    },
+    mention: {
+      subject: (title) => `You were mentioned on "${title}"`,
+      heading: 'Someone mentioned you',
+      lead: (actorName, title, workspaceName) =>
+        `${actorName} mentioned you in a comment on the card "${title}" in the workspace "${workspaceName}".`,
+      leadAnonymous: (title, workspaceName) =>
+        `You were mentioned in a comment on the card "${title}" in the workspace "${workspaceName}".`,
+      action: 'Open the comment',
+    },
+    dueSoon: {
+      subject: (title) => `"${title}" is due soon`,
+      heading: 'A card is due soon',
+      lead: (title, workspaceName, dueDate) =>
+        `The card "${title}" in the workspace "${workspaceName}" is due on ${dueDate}.`,
+      action: 'Open the card',
+    },
   },
   tr: {
     linkFallback: 'Buton çalışmıyorsa bu bağlantıyı tarayıcınıza yapıştırın:',
@@ -156,6 +211,32 @@ const MAIL_COPY: Record<Locale, MailCopy> = {
       action: 'Daveti görüntüle',
       note: 'Önce bu e-posta adresiyle giriş yapın ve adresi doğrulayın — bir davet yalnızca doğrulanmış bir adresten kabul edilebilir.',
       closing: 'Böyle bir davet beklemiyorsanız bu e-postayı yok sayabilirsiniz.',
+    },
+    notificationFooter: `Bu e-postayı, ${PRODUCT_NAME} hesabınızda bildirim e-postaları açık olduğu için alıyorsunuz. Ayarlar sayfasından kapatabilirsiniz.`,
+    assignment: {
+      subject: (title) => `"${title}" kartına atandınız`,
+      heading: 'Yeni bir atamanız var',
+      lead: (actorName, title, workspaceName) =>
+        `${actorName}, sizi "${workspaceName}" workspace'indeki "${title}" kartına atadı.`,
+      leadAnonymous: (title, workspaceName) =>
+        `"${workspaceName}" workspace'indeki "${title}" kartına atandınız.`,
+      action: 'Kartı aç',
+    },
+    mention: {
+      subject: (title) => `"${title}" kartında sizden bahsedildi`,
+      heading: 'Biri sizden bahsetti',
+      lead: (actorName, title, workspaceName) =>
+        `${actorName}, "${workspaceName}" workspace'indeki "${title}" kartına yazdığı yorumda sizden bahsetti.`,
+      leadAnonymous: (title, workspaceName) =>
+        `"${workspaceName}" workspace'indeki "${title}" kartına yazılan bir yorumda sizden bahsedildi.`,
+      action: 'Yorumu aç',
+    },
+    dueSoon: {
+      subject: (title) => `"${title}" kartının süresi yaklaşıyor`,
+      heading: 'Bir kartın süresi yaklaşıyor',
+      lead: (title, workspaceName, dueDate) =>
+        `"${workspaceName}" workspace'indeki "${title}" kartının son tarihi ${dueDate}.`,
+      action: 'Kartı aç',
     },
   },
 };
@@ -222,4 +303,90 @@ export function buildInvitationEmail(params: InvitationEmailParams): MailMessage
         `<p>${escapeHtml(copy.note)}</p><p>${escapeHtml(copy.closing)}</p>`,
     ),
   };
+}
+
+/**
+ * A due date as a person reads it, in their language.
+ *
+ * `dueDate` is a UTC calendar day (the web formats it with `timeZone: 'UTC'` too), so the
+ * email names the day and nothing finer: a time would only be wrong in every zone but one.
+ */
+function formatDueDate(dueDate: Date, locale: Locale): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeZone: 'UTC' }).format(dueDate);
+}
+
+/** The three notification emails share everything but their copy table and one sentence. */
+function notificationEmail(
+  params: { to: string; taskUrl: string; locale: Locale },
+  copy: { subject: string; heading: string; action: string },
+  lead: string,
+): MailMessage {
+  const shared = copyFor(params.locale);
+  return {
+    to: params.to,
+    subject: singleLine(copy.subject),
+    text: [lead, '', params.taskUrl, '', shared.notificationFooter].join('\n'),
+    html: htmlDocument(
+      copy.heading,
+      `<p>${escapeHtml(lead)}</p>` +
+        actionHtml(copy.action, params.taskUrl, shared.linkFallback) +
+        `<p style="font-size:12px;color:#666">${escapeHtml(shared.notificationFooter)}</p>`,
+    ),
+  };
+}
+
+export interface ActorNotificationEmailParams {
+  to: string;
+  /** Display name of the member whose action caused the notification; may be blank. */
+  actorName: string;
+  taskTitle: string;
+  workspaceName: string;
+  /** The web app's task page, see `buildTaskUrl`. */
+  taskUrl: string;
+  /** The recipient's stored language; a notification has no request to negotiate from. */
+  locale: Locale;
+}
+
+export function buildAssignmentEmail(params: ActorNotificationEmailParams): MailMessage {
+  const copy = copyFor(params.locale).assignment;
+  const title = singleLine(params.taskTitle);
+  const workspaceName = singleLine(params.workspaceName);
+  const actorName = singleLine(params.actorName);
+  const lead =
+    actorName === ''
+      ? copy.leadAnonymous(title, workspaceName)
+      : copy.lead(actorName, title, workspaceName);
+
+  return notificationEmail(params, { ...copy, subject: copy.subject(title) }, lead);
+}
+
+export function buildMentionEmail(params: ActorNotificationEmailParams): MailMessage {
+  const copy = copyFor(params.locale).mention;
+  const title = singleLine(params.taskTitle);
+  const workspaceName = singleLine(params.workspaceName);
+  const actorName = singleLine(params.actorName);
+  const lead =
+    actorName === ''
+      ? copy.leadAnonymous(title, workspaceName)
+      : copy.lead(actorName, title, workspaceName);
+
+  return notificationEmail(params, { ...copy, subject: copy.subject(title) }, lead);
+}
+
+export interface DueSoonEmailParams {
+  to: string;
+  taskTitle: string;
+  workspaceName: string;
+  dueDate: Date;
+  taskUrl: string;
+  locale: Locale;
+}
+
+export function buildDueSoonEmail(params: DueSoonEmailParams): MailMessage {
+  const copy = copyFor(params.locale).dueSoon;
+  const title = singleLine(params.taskTitle);
+  const workspaceName = singleLine(params.workspaceName);
+  const lead = copy.lead(title, workspaceName, formatDueDate(params.dueDate, params.locale));
+
+  return notificationEmail(params, { ...copy, subject: copy.subject(title) }, lead);
 }

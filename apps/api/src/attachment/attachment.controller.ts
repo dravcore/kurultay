@@ -8,6 +8,7 @@ import {
   Post,
   Res,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -22,6 +23,7 @@ import {
   ApiProduces,
   ApiResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnsupportedMediaTypeResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
@@ -46,6 +48,7 @@ import { AttachmentDownloadService } from './attachment-download.service';
 import { AttachmentService } from './attachment.service';
 import { CreateAttachmentDto } from './dto/create-attachment.dto';
 import type { UploadedFile as MulterFile } from './multer-file';
+import { UploadBudgetGuard } from './upload-budget.guard';
 
 /**
  * Mounted at the workspace root like `CommentController`, because three of its five routes are
@@ -97,6 +100,10 @@ export class AttachmentController {
    * `MulterModule.registerAsync` in `attachment.module.ts`, which resolves them through DI at
    * module setup — inline options would be evaluated when this file is imported and would freeze
    * `ATTACHMENT_MAX_BYTES` for the process (plan decision D5).
+   *
+   * `UploadBudgetGuard` is a guard and not an interceptor for ordering: Nest runs every guard
+   * before any interceptor, so the per-IP byte budget is charged and, if spent, refused before
+   * `FileInterceptor` lets multer buffer a single byte of the body.
    */
   @Post('tasks/:taskId/attachments')
   @ApiOperation({
@@ -151,11 +158,17 @@ export class AttachmentController {
   @ApiCreatedResponse({ type: AttachmentSchema })
   @ApiPayloadTooLargeResponse({
     description:
-      'The **file part** is over `ATTACHMENT_MAX_BYTES` (default `26214400` — 25 MiB), which ' +
-      'is a disk ceiling and is unrelated to `REQUEST_BODY_MAX_BYTES`: multipart bodies are ' +
-      'read by multer, which the JSON body limit never sees. A reverse proxy in front of this ' +
-      'API caps the whole request body separately and higher, and answers `413` with something ' +
-      'that is not JSON at all — the response body is what tells the two apart.',
+      "Two distinct ceilings answer with this status, told apart by the envelope's `error` " +
+      'field. `"Payload Too Large"`: the **file part** is over `ATTACHMENT_MAX_BYTES` (default ' +
+      '`26214400` — 25 MiB), which is a disk ceiling and is unrelated to ' +
+      '`REQUEST_BODY_MAX_BYTES`: multipart bodies are read by multer, which the JSON body ' +
+      'limit never sees. `"Attachment Quota Exceeded"`: the file fits on its own but would ' +
+      "push the workspace's or the instance's stored FILE bytes past its quota " +
+      '(`ATTACHMENT_WORKSPACE_QUOTA_BYTES`, default 2 GiB, or `ATTACHMENT_INSTANCE_QUOTA_BYTES`, ' +
+      'default 20 GiB; `0` lifts one; ADR 0027). A reverse proxy in front of this API caps the ' +
+      'whole request body ' +
+      'separately and higher, and answers `413` with something that is not JSON at all — the ' +
+      'response body is what tells the layers apart.',
     type: ErrorEnvelopeSchema,
   })
   @ApiUnsupportedMediaTypeResponse({
@@ -164,8 +177,26 @@ export class AttachmentController {
       'failed one of the four fallback conditions.',
     type: ErrorEnvelopeSchema,
   })
+  @ApiTooManyRequestsResponse({
+    description:
+      "Two budgets answer with this status, told apart by the envelope's `error` field. " +
+      '`"Too Many Requests"`: more than 20 requests from this IP in the current minute, like ' +
+      'any other throttled route. `"Upload Budget Exceeded"`: the bytes this IP has submitted ' +
+      'to this route in the current minute, counted by `Content-Length` before the body is ' +
+      'read, would pass `ATTACHMENT_UPLOAD_BYTES_PER_MINUTE` (default `268435456`, 256 MiB; ' +
+      '`0` turns the budget off). A multipart request without `Content-Length` is charged ' +
+      '`ATTACHMENT_MAX_BYTES`. Both carry `Retry-After` with the seconds to wait.',
+    headers: {
+      'Retry-After': {
+        description: 'Seconds to wait before retrying.',
+        schema: { type: 'integer' },
+      },
+    },
+    type: ErrorEnvelopeSchema,
+  })
   @WorkspaceRoles(...CONTENT_ROLES)
   @ThrottleAttachmentUpload()
+  @UseGuards(UploadBudgetGuard)
   @UseInterceptors(FileInterceptor('file'))
   create(
     @UuidParam('workspaceId') workspaceId: string,

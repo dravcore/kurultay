@@ -2,6 +2,23 @@
 
 **Durum:** Kabul edildi
 **Tarih:** 2026-08-14
+**Güncellendi:** 2026-08-18 — `WorkspaceInvitation`, aşağıdaki asıl dört pencerenin üzerine ek bir
+pencere olarak süpürmeye katıldı: `INVITATION_RETENTION_DAYS` (varsayılan `createdAt`'ten 90 gün,
+yalnızca sonuçlanmış satırlar). Aşağıdaki tablo listesi, şemada bir kullanıcıya ait olmak zorunda
+olmayan tek adresi atlıyordu (denetim bulgusu DB-01).
+**Güncellendi:** 2026-08-18 — Sonuçlar bölümündeki "süpürmenin kendi yüklemleri için indeks
+eklenmedi" ifadesi aşağıdaki dört tablodan ikisi için artık geçerli değil:
+`20260814180000_retention_sweep_indexes` migration'ı, süpürmeyi üretim benzeri hacimde ölçtükten
+sonra her birinin tüm tabloyu sıralı taradığını bularak `Session_expiresAt_idx` ve
+`Verification_expiresAt_idx` indekslerini ekliyor (issue #187). Aynı migration `UsagePing_createdAt_idx`'i
+de ekliyor, ama `UsagePing` bu ADR'ın listelediği dört tablodan biri değil; süpürmenin ayrıca
+kapsadığı telemetri-ping tablosu, [ADR 0021](0021-activation-funnel-and-opt-in-telemetry.md) ile
+eklendi. `Activity.createdAt` ve `Notification.readAt` kasıtlı olarak dokunulmadan bırakıldı —
+ikisi de, bu ADR'ın aksi yöndeki tahminine rağmen, farklı bir öncü sütun üzerinden zaten bir
+indekse ulaşıyor, yani aşağıdaki takas o ikisi için hâlâ geçerli. Bu, ADR'ın kendi "sadece bir
+süpürmenin penceresini aştığı gözlemlenirse yeniden gözden geçir" şartının tam olarak tasarlandığı
+gibi işlemesi: karar, varsayımla değil ölçümle ve yalnızca ölçümün istediği yerde yeniden gözden
+geçirildi.
 
 > 🌐 [English (kanonik)](../../decisions/0020-data-retention.md) | Türkçe — Bu çeviri güncel olmayabilir; kanonik kaynak İngilizce'dir.
 

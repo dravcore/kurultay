@@ -84,6 +84,17 @@ describe('ConfirmDialog', () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 
+  it('announces the failure to assistive tech and moves focus to it', async () => {
+    const onConfirm = vi.fn().mockRejectedValue(new Error('boom'));
+    renderDialog({ onConfirm });
+
+    fireEvent.click(confirmButton());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/failed: Error: boom/);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
   it('re-enables the confirm button after a failure', async () => {
     // The `finally` that is easy to drop: without it the dialog sits behind a dead button
     // with no way to retry.

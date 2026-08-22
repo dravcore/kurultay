@@ -233,19 +233,33 @@ yokluğu assert etmek de bunu olası değil, imkânsız kılar.
 
 ## Dosya konvansiyonları
 
-| Tür                          | Konum                               | Desen                                                                                                                                                                                                                                            |
-| ---------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Unit                         | Kaynak dosyayla yerinde (colocated) | `apps/api/src/task/task.service.spec.ts`                                                                                                                                                                                                         |
-| Integration                  | Ayrı bir test kökü                  | `apps/api/test/task.e2e-spec.ts`                                                                                                                                                                                                                 |
-| Test helper'ları/factory'ler | Test kökü altında paylaşılır        | `apps/api/test/helpers/`, `apps/api/test/factories/`                                                                                                                                                                                             |
-| Geçici depolama kökü         | Veritabanı helper'ının yanında      | `apps/api/test/helpers/storage.ts`                                                                                                                                                                                                               |
-| Girdi fixture'ları           | Test kökünde, kaynağına göre        | `apps/api/test/fixtures/trello/` — elle yazılmış Trello export'ları; hem unit hem entegrasyon testleri okur, dizinin kendi README'si hiçbirinin gerçek bir export olmadığını kayda geçirir ([ADR 0025](decisions/0025-trello-import-mapping.md)) |
-| Browser e2e                  | Repository seviyesinde paket        | `e2e/tests/board-realtime.spec.ts`                                                                                                                                                                                                               |
-| Browser e2e helper'ları      | Onların yanında                     | `e2e/support/`, `e2e/stack-env.ts`                                                                                                                                                                                                               |
+| Tür                          | Konum                               | Desen                                                                                                                                                                                                                                                                                            |
+| ---------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Unit                         | Kaynak dosyayla yerinde (colocated) | `apps/api/src/task/task.service.spec.ts`                                                                                                                                                                                                                                                         |
+| Integration                  | Ayrı bir test kökü                  | `apps/api/test/task.e2e-spec.ts`                                                                                                                                                                                                                                                                 |
+| Test helper'ları/factory'ler | Test kökü altında paylaşılır        | `apps/api/test/helpers/`, `apps/api/test/factories/`                                                                                                                                                                                                                                             |
+| Geçici depolama kökü         | Veritabanı helper'ının yanında      | `apps/api/test/helpers/storage.ts`                                                                                                                                                                                                                                                               |
+| Girdi fixture'ları           | Test kökünde, kaynağına göre        | `apps/api/test/fixtures/trello/` — elle yazılmış Trello export'ları; hem unit hem entegrasyon testleri okur, ayrıca `real/` altında iki anonimleştirilmiş gerçek export; dizinin kendi README'si hangisinin hangisi olduğunu kayda geçirir ([ADR 0025](decisions/0025-trello-import-mapping.md)) |
+| Browser e2e                  | Repository seviyesinde paket        | `e2e/tests/board-realtime.spec.ts`                                                                                                                                                                                                                                                               |
+| Browser e2e helper'ları      | Onların yanında                     | `e2e/support/`, `e2e/stack-env.ts`                                                                                                                                                                                                                                                               |
 
 Nest'in generator'ı integration testlerini `*.e2e-spec.ts` olarak adlandırıyor; bunlar
 browser e2e değil API integration testleri olsa da bu isim tooling uyumluluğu için
 korunuyor.
+
+**Gerçek Trello export'ları.** `apps/api/test/fixtures/trello/real/` dizininde
+`scripts/anonymise-trello-export.mjs` betiğinden geçmiş gerçek export'lar durur (yapı bayt bayt
+korunur, her metin parçası aynı uzunlukta bir takma adla değiştirilir) — 2026-08-22 itibarıyla iki
+tane: Trello'nun kendi varsayılan "Starter Guide" panosu ve on bir listeli bir pano.
+`trello-import-real.e2e-spec.ts` oradaki her `*.json` dosyasını gerçek endpoint üzerinden import
+eder ve raporu ile veritabanını dosyadan türetilen sayılarla karşılaştırır; ikisi de temiz şekilde
+import ediliyor, okuyucunun kullandığı hiçbir alanda sentetik fixture'larla fark çıkmadı
+([`fixtures/trello/README.md#field-mapping-diffs`](../../apps/api/test/fixtures/trello/README.md#field-mapping-diffs)).
+Dizin bir gün yeniden boşalırsa spec tam olarak bir atlanmış test bildirir,
+`no anonymised real Trello exports in fixtures/trello/real yet (v0.3.0 gate)`, böylece açık kapı
+CI'da görünür kalır. Anonimleştiricinin kendi unit testleri `pnpm test:scripts` ile `node:test`
+üzerinde çalışır, çünkü `scripts/` dizininin bağımlılığı yoktur; aynı spec, anonimleştirilmiş bir
+export'un orijinaliyle birebir aynı şekilde import edildiğini sentetik fixture üzerinde de kanıtlar.
 
 ## Testleri çalıştırma
 
@@ -261,12 +275,22 @@ pnpm --filter @kurul/api test:cov      # api coverage raporu
 pnpm --filter @kurul/web test          # web unit (Vitest)
 pnpm --filter @kurul/web test:watch    # web unit, watch modu
 
+pnpm test:scripts                         # scripts/ (node:test, bağımlılık yok)
+
 pnpm test:browser                         # browser e2e (Mailpit de gerekir)
 ```
 
 Integration testler, test setup'ı tarafından oluşturulan ve migrate edilen **ayrı bir
 veritabanına** (`kurul_test`) karşı çalışır. Geliştirme veritabanına asla dokunmazlar.
 Browser suite'i üçüncü bir veritabanı kullanır — bkz. [İzolasyon](#izolasyon).
+
+Bu komutların hiçbiri `packages/*/dist` gerektirmez. İki Jest config'i ve Vitest config'leri
+`@kurul/shared-types` ile `@kurul/auth-access` paketlerini `src/index.ts` dosyalarına eşler;
+böylece suite'ler `pnpm typecheck`'in okuduğu kaynağı derler ve bayat bir build'e karşı
+geçemez. `apps/api/src/workspace-packages.spec.ts`, `apps/api/test/harness.e2e-spec.ts` ve
+`apps/web/workspace-packages.test.ts` bu eşleme kaldırılırsa kırmızıya döner. Build hâlâ
+`pnpm typecheck`, `nest build`, `next build` ve `pnpm dev` için gereklidir, bkz.
+[development.md](development.md#klonlama-ve-kurulum).
 
 ## Test yazma
 
@@ -352,19 +376,21 @@ yayımlar (`api-coverage`, `web-coverage`).
 
 Her pull request, `develop` ve `main` üzerinde de olduğu gibi şunları çalıştırır:
 
-| Adım                | Komut                                                                                                 |
-| ------------------- | ----------------------------------------------------------------------------------------------------- |
-| Shared paket build  | `pnpm --filter @kurul/shared-types build && pnpm --filter @kurul/auth-access build`                   |
-| Lint                | `pnpm lint`                                                                                           |
-| Format kontrolü     | `pnpm format:check`                                                                                   |
-| Typecheck           | `pnpm typecheck` (workspace'ler genelinde `tsc --noEmit`)                                             |
-| Audit               | `pnpm audit --audit-level high`                                                                       |
-| Unit testler (api)  | `pnpm --filter @kurul/api test:cov`                                                                   |
-| Unit testler (web)  | `pnpm --filter @kurul/web exec vitest run --coverage`                                                 |
-| Unit testler (pkgs) | `pnpm --filter "./packages/*" test`                                                                   |
-| Integration testler | Postgres ve Redis service container'larına karşı `pnpm --filter @kurul/api test:e2e`                  |
-| Build               | `pnpm build`                                                                                          |
-| **Kapı** (zorunlu)  | `ci-ok` — tüm upstream job'lar (`lint`, `test`, `build`) başarıysa geçer (atlanmamış/iptal edilmemiş) |
+| Adım                   | Komut                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Shared paket build     | `pnpm --filter @kurul/shared-types build && pnpm --filter @kurul/auth-access build`                                 |
+| Lint                   | `pnpm lint`                                                                                                         |
+| Format kontrolü        | `pnpm format:check`                                                                                                 |
+| Typecheck              | `pnpm typecheck` (workspace'ler genelinde `tsc --noEmit`)                                                           |
+| Audit                  | `pnpm audit --audit-level high`                                                                                     |
+| Unit testler (api)     | `pnpm --filter @kurul/api test:cov`                                                                                 |
+| Unit testler (web)     | `pnpm --filter @kurul/web exec vitest run --coverage`                                                               |
+| Unit testler (pkgs)    | `pnpm --filter "./packages/*" test`                                                                                 |
+| Unit testler (scripts) | `pnpm test:scripts`                                                                                                 |
+| Integration testler    | Postgres ve Redis service container'larına karşı `pnpm --filter @kurul/api test:e2e`                                |
+| Build                  | `pnpm build`                                                                                                        |
+| Imaj build + tarama    | Yayımlanan üç imaj, ardından her birine Trivy (aşağıya bakın)                                                       |
+| **Kapı** (zorunlu)     | `ci-ok` — tüm upstream job'lar (`lint`, `test`, `build`, `image-scan`) başarıysa geçer (atlanmamış/iptal edilmemiş) |
 
 **Merge öncesi tüm adımlar geçmelidir.** Kapı job'ı (`ci-ok`) branch korumasında yapılandırılan
 tek zorunlu status kontrol — eğer herhangi bir upstream job başarısızsa, atlanırsa ya da iptal
@@ -386,6 +412,28 @@ request'lerde çalışır. Bkz.
 [git-strategy.md](git-strategy.md#pull-request-süreci).
 
 Workflow dosyası: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
+
+### Imaj build'i ve CVE taraması
+
+`image-scan`, projenin yayımladığı üç imajı (`kurul-api`'nin `runner` ve `migrate` hedefleri
+ile `kurul-web`) build eder ve her birini Trivy'den geçirir. **Düzeltmesi mevcut olan** bir
+HIGH ya da CRITICAL zafiyet o bacağı, dolayısıyla kapıyı düşürür. Bu job'dan önce bir
+Dockerfile'ı build eden tek şey tag push'unda koşan `release-images.yml` idi; yani bozuk bir
+imajı ya da zafiyetli bir base'i, işi onu yayımlamak olan workflow keşfediyordu.
+
+Bilinmeye değer iki tercih:
+
+- **Düzeltmesi olmayan zafiyetler yoksayılır** (`ignore-unfixed: true`). Hiçbir yerde
+  düzeltilmiş sürümü olmayan bir base imaj CVE'si, hiçbir PR'ın yapabileceği bir şey olmadığı
+  halde her PR'ı düşürürdü; sürekli kırmızı duran bir kontrolü de kimse okumaz. Geriye tam
+  olarak aksiyon alınabilir küme kalır: bir base imaj yükseltmesi ya da bir bağımlılık
+  yükseltmesi.
+- **`build`'den sonra değil, `lint` ve `test`'in yanında koşar.** Job bilinçli olarak kritik
+  yolun dışında; böylece pipeline duvar saatine değil runner dakikalarına mal olur ve aynı
+  workflow'un `develop` koşularının yazdığı buildx katman cache'ini (`type=gha`) okur.
+
+Hiçbir şey push edilmez: `push: false` ve `load: true` ile her imaj kendi runner'ının içinde
+kalır. Yayımlama, tag'in arkasında, `release-images.yml`'de kalır.
 
 ### CI'da browser e2e
 
@@ -417,4 +465,4 @@ edilebilir kılan da budur.
 - [coding-standards.md](coding-standards.md) — testlerin varsaydığı kod konvansiyonları
 - [api-conventions.md](api-conventions.md) — assert edilecek status kodları ve hata şekilleri
 - [git-strategy.md](git-strategy.md) — PR gereksinimleri
-- [roadmap.md](roadmap.md) — MVP durumu ve Beyond MVP
+- [../../ROADMAP.md](../../ROADMAP.md) — MVP durumu ve Beyond MVP

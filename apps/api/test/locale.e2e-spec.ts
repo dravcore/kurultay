@@ -50,7 +50,7 @@ describe('Locale preference (e2e)', () => {
         .expect(({ body }) => expect(body.locale).toBe('en'));
 
       // Read back on a fresh request: Better Auth caches the session user in a cookie for
-      // five minutes, so a locale served off the session would still say null here.
+      // 60 seconds, so a locale served off the session would still say null here.
       await user.agent
         .get('/me')
         .expect(200)

@@ -1,15 +1,21 @@
 # 0015. No External Contributions; Legal Spend Deferred
 
-**Status:** Accepted
+**Status:** Superseded by [0028](0028-open-contributions-hosted-service.md)
 **Date:** 2026-08-12
 
 > 🌐 English (canonical) | [Türkçe](../tr/decisions/0015-no-external-contributions.md)
+
+> **Superseded:** contributions were reopened on 2026-08-21 by
+> [0028](0028-open-contributions-hosted-service.md). Code, documentation and translation pull
+> requests are accepted again under plain AGPL-3.0, with no CLA and nothing to sign. The FSEK
+> question below no longer needs an answer, because nothing is relicensed any more. This record
+> is kept as history; nothing in it is in force.
 
 ## Context
 
 [ADR 0014](0014-dual-licensing-cla.md) settled the business model — dual licensing, with a
 Contributor License Agreement making it legally possible — and shipped
-[docs/cla.md](../cla.md) as a Harmony-derived draft plus a merge-blocking GitHub Actions
+`docs/cla.md` (deleted 2026-08-22, in git history) as a Harmony-derived draft plus a merge-blocking GitHub Actions
 check. It also recorded, honestly, that the legal work was not finished: the document carries
 unresolved `[FILL: …]` and `[ASK A LAWYER: …]` markers and a prominent not-in-force banner.
 
@@ -35,9 +41,9 @@ has run on for decades. Bug reports, feature ideas, design feedback and discussi
 as much as ever; a one-line typo or dead-link fix still carries no copyright worth arguing
 about and is still welcome.
 
-**The CLA draft is kept, not enacted.** [docs/cla.md](../cla.md) stays in the repository with
+**The CLA draft is kept, not enacted.** `docs/cla.md` (deleted 2026-08-22, in git history) stays in the repository with
 its not-in-force banner intact, and the CLA workflow
-([`.github/workflows/cla.yml`](../../.github/workflows/cla.yml)) is disabled — triggers cut
+(`.github/workflows/cla.yml`, deleted by 0028, last version in git history) is disabled — triggers cut
 back to `workflow_dispatch` and the job guarded with `if: ${{ false }}` — rather than deleted.
 The work is done and waiting; if the legal review ever happens, enabling it is a small change,
 not a rewrite.

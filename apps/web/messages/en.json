@@ -136,6 +136,16 @@
         "saveError": "Could not save your language.",
         "saveErrorSignedOut": "Your session ended. Sign in to save this."
       },
+      "notifications": {
+        "title": "Notifications",
+        "description": "What reaches your inbox. Notifications inside Kurul are not affected.",
+        "emailLabel": "Email me when I am assigned to a card, mentioned in a comment, or a card of mine is due soon",
+        "help": "Only applies on a server that can send email. Each notification is one message; there is no daily summary yet.",
+        "saved": "Notification settings updated",
+        "loadError": "Your notification settings couldn't load.",
+        "saveError": "Could not save your notification settings.",
+        "saveErrorSignedOut": "Your session ended. Sign in to save this."
+      },
       "members": {
         "title": "Members",
         "description": "Who can open this workspace, and what they can do once they are in it.",
@@ -314,6 +324,7 @@
       "listSubtitle": "Open a board to divide the work.",
       "listError": "Your boards couldn't load.",
       "loadError": "The board couldn't load.",
+      "unavailable": "This board doesn't exist, or you don't have access to it.",
       "loadingMore": "Loading the rest of the tasks…",
       "backToBoards": "Back to boards",
       "emptyTitle": "No boards yet",
@@ -520,6 +531,7 @@
           "count": "{count, plural, one {# attachment} other {# attachments}}",
           "storageOff": "This instance does not store files. You can still attach links.",
           "tooLarge": "That file is larger than this instance accepts.",
+          "quotaExceeded": "There isn't enough attachment storage left for that file.",
           "wrongType": "That file type is not accepted.",
           "saveError": "Could not attach that.",
           "forbidden": "You don't have access to change this task. Ask a workspace admin."

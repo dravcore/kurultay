@@ -330,5 +330,5 @@ pnpm typecheck     # shared paket build + tsc --noEmit
 - [api-conventions.md](api-conventions.md) — REST, DTO adlandırması, hata formatı
 - [testing.md](testing.md) — test yerleşimi ve beklentiler
 - [git-strategy.md](git-strategy.md) — commit'ler ve PR süreci
-- [project-skeleton.md](project-skeleton.md) — bu kuralların varsaydığı dizin yerleşimi
+- [architecture.md](architecture.md#2-monorepo-yerleşimi) — bu kuralların varsaydığı dizin yerleşimi
 - [../CONTRIBUTING.md](../../CONTRIBUTING.md) — katkı süreci

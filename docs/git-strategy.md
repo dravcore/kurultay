@@ -248,7 +248,18 @@ docker compose down -v                     # -v: leave no volume behind for the 
 # 5. Tag the merge commit on main. This is also what publishes the container
 #    images (.github/workflows/release-images.yml) — no tag, no images, and
 #    `docker compose pull` fails for everyone following docs/self-hosting.md.
-#    The same run signs both images with cosign and generates their SBOMs.
+#    The same run signs all three images with cosign and generates their SBOMs.
+#
+#    The first time a given image *name* is pushed to GHCR, the package it
+#    creates is PRIVATE by default — independent of the repository's own
+#    visibility — and an anonymous `docker compose pull` against it fails
+#    with "denied", exactly the symptom in audit finding OPS-01. There is no
+#    API for this: flip it to Public by hand, once, in the organization's
+#    package settings (org -> Packages -> the new image -> Package settings
+#    -> Change visibility) before telling anyone the release is out.
+#    `kurul-migrate` needs this on the first release after v0.2.0 — the
+#    first one this workflow ever publishes it from — and any image name
+#    added later needs it again, once, the same way.
 git switch main && git pull
 git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0
@@ -256,12 +267,13 @@ git push origin v0.2.0
 # 6. Wait for the Release images workflow to finish, then publish the GitHub
 #    Release for tag v0.2.0, body = the CHANGELOG section for 0.2.0.
 #
-#    The workflow gets there first and leaves a DRAFT release with the four SBOM
-#    assets already attached — so step 6 is normally "fill in the body and hit
-#    Publish", not "create a release". Publishing by hand before the workflow
-#    finishes is not an error either: it only uploads the assets onto whatever
-#    release it finds and never rewrites the body, the title or the draft flag.
-#    Waiting is still the better order — the assets are part of what a release is.
+#    The workflow gets there first and leaves a DRAFT release with the six SBOM
+#    assets already attached (3 images × 2 platforms) — so step 6 is normally
+#    "fill in the body and hit Publish", not "create a release". Publishing by
+#    hand before the workflow finishes is not an error either: it only uploads
+#    the assets onto whatever release it finds and never rewrites the body,
+#    the title or the draft flag. Waiting is still the better order — the
+#    assets are part of what a release is.
 
 # 7. Back-merge main into develop so the version bump and any
 #    release-branch fixes are not lost.
@@ -373,7 +385,7 @@ that SemVer's guarantees are weaker before 1.0.
 - MINOR: backwards-compatible feature.
 - PATCH: backwards-compatible fix.
 
-1.0.0 is cut when the MVP feature set in [roadmap.md](roadmap.md) is complete and the REST
+1.0.0 is cut when the MVP feature set in [ROADMAP.md](../ROADMAP.md) is complete and the REST
 API is considered stable enough to promise compatibility.
 
 API versioning stance (no `/v1` prefix before 1.0) is covered in
@@ -398,6 +410,6 @@ API versioning stance (no `/v1` prefix before 1.0) is covered in
 - [development.md](development.md) — environment setup and the day-to-day loop
 - [coding-standards.md](coding-standards.md) — what reviewers check in a PR
 - [testing.md](testing.md) — what CI runs on every PR
-- [roadmap.md](roadmap.md) — what a release contains
+- [../ROADMAP.md](../ROADMAP.md) — what a release contains
 - [decisions/0008-git-flow-semver.md](decisions/0008-git-flow-semver.md) — why Git Flow and
   SemVer were chosen

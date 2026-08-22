@@ -32,6 +32,17 @@ registerPoolConsumer(() => prisma.$disconnect());
 const betterAuthUrl = envString('BETTER_AUTH_URL', 'http://localhost:4000');
 const webUrl = webAppUrl();
 
+// How long `session.cookieCache` answers `auth.api.getSession` from a signed cookie without a
+// database read (SEC-01). That skipped read is also the entire reason server-side revocation —
+// password change, admin force-delete, `Session` rows cleared to recover a stolen cookie — can
+// keep looking "live" after it happened: the browser's cookie is still validly signed. At
+// self-host scale one DB read per user per minute is noise, so the cache buys little by running
+// longer than that; pinned to 60s rather than dropped outright, since a per-request DB round
+// trip is still not free at the top of the request path. Not exposed as an env knob — nobody has
+// asked to tune it, and the trigger for adding one is a deployment where the per-minute read
+// itself measurably hurts, not a guess that one might exist.
+const SESSION_COOKIE_CACHE_MAX_AGE_SECONDS = 60;
+
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
@@ -45,10 +56,11 @@ export const auth = betterAuth({
   rateLimit: authRateLimitOptions(),
   session: {
     // Avoids a database round trip on every authenticated request; the signed cookie
-    // is re-validated against the DB once it expires.
+    // is re-validated against the DB once it expires. See the comment on
+    // `SESSION_COOKIE_CACHE_MAX_AGE_SECONDS` above for why that expiry is 60s, not longer.
     cookieCache: {
       enabled: true,
-      maxAge: 5 * 60,
+      maxAge: SESSION_COOKIE_CACHE_MAX_AGE_SECONDS,
     },
   },
   advanced: {
@@ -113,7 +125,7 @@ export const auth = betterAuth({
     // verification is optional for signing in but mandatory before joining a workspace, so a
     // user must always have a way to reach the verified state.
     sendOnSignUp: true,
-    // The session cookie caches the user for 5 minutes (`session.cookieCache`), so a user who
+    // The session cookie caches the user for 60 seconds (`session.cookieCache`), so a user who
     // has just verified would keep presenting `emailVerified: false` — and keep being refused
     // by accept-invitation — until that cache expired. Better Auth rewrites the session cookie
     // here, which fixes the staleness, and signs the user in when they opened the link in a

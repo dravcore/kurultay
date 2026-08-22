@@ -1,13 +1,14 @@
 # 0014. Dual Licensing and a Contributor License Agreement
 
-**Status:** Accepted
+**Status:** Superseded by [0028](0028-open-contributions-hosted-service.md)
 **Date:** 2026-08-11
 
 > 🌐 English (canonical) | [Türkçe](../tr/decisions/0014-dual-licensing-cla.md)
 
-> **Follow-up:** the target model below stands, but the route to it is suspended by
-> [0015](0015-no-external-contributions.md) — external contributions are not accepted, the CLA
-> is held as an unenacted draft with its check disabled, and legal review is deferred.
+> **Superseded:** on 2026-08-21 the commercial-license model and the CLA described below were
+> abandoned by [0028](0028-open-contributions-hosted-service.md). Revenue now comes only from a
+> hosted service run by Dravcore, and contributions are accepted under plain AGPL-3.0 with no
+> agreement to sign. This record is kept as history; nothing in it is in force.
 
 ## Context
 
@@ -42,7 +43,7 @@ feature. Organizations that cannot accept AGPL's obligations buy a separate comm
 to that same code from the maintainer.
 
 To make the second half legally possible, every external contributor signs a CLA
-([docs/cla.md](../cla.md)) granting the maintainer a non-exclusive, worldwide, perpetual,
+(`docs/cla.md` (deleted 2026-08-22, in git history)) granting the maintainer a non-exclusive, worldwide, perpetual,
 irrevocable, sublicensable license including the right to distribute the contribution under
 **any** license terms, while the contributor keeps copyright and every right to reuse their own
 code. The agreement is derived from the **Harmony** Individual CLA (HA-CLA-I, "any license"
@@ -62,7 +63,7 @@ Three specifics follow from the maintainer being a natural person and Turkish-re
 - **The document is a draft.** It ships with a prominent not-in-force banner and unresolved
   `[ASK A LAWYER: …]` markers. Nobody is asked to sign until those are resolved.
 
-Enforcement is a GitHub Actions check ([`.github/workflows/cla.yml`](../../.github/workflows/cla.yml))
+Enforcement is a GitHub Actions check (`.github/workflows/cla.yml`, deleted by 0028, last version in git history)
 that blocks merge until every commit author has signed by posting a fixed sentence as a PR
 comment.
 
@@ -120,7 +121,7 @@ unchanged; 0014 replaces its open-core aside with a settled model.
 - **The legal work is not done.** The document is a draft with open questions — who "Us" is
   once a company exists, whether a PR comment is a valid signature, whether FSEK's form
   requirements reach a license grant, which law governs. Those are listed in
-  [docs/cla.md](../cla.md#questions-for-a-lawyer) and have to be answered before the CLA binds
+  `docs/cla.md` (deleted 2026-08-22, in git history) and had to be answered before the CLA binds
   anyone. Until then the check is scaffolding, not enforcement.
 - **A corporate contributor has no path yet.** There is no Entity CLA. A company that wants to
   contribute has to wait for one, or its employee signs individually with employer approval,

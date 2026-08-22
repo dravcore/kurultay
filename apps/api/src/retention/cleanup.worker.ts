@@ -67,6 +67,18 @@ export const MAX_BATCHES_PER_TABLE = 1000;
 
 export const DEFAULT_NOTIFICATION_RETENTION_DAYS = 90;
 export const DEFAULT_ACTIVITY_RETENTION_DAYS = 365;
+/**
+ * Ninety days, matching {@link DEFAULT_NOTIFICATION_RETENTION_DAYS} rather than the activity
+ * year — and the reason is who the row is about.
+ *
+ * `Activity` gets a year because it is a workspace's own history, browsed by the people in it.
+ * A finished invitation is not that: the only thing it still holds is the address of somebody
+ * who may never have had an account here, and nobody browses it — the settings screen lists
+ * `pending` rows only. The shortest window that still leaves a support answer to "did we ever
+ * invite this person" is the right one, and that is the same ninety days a read notification
+ * gets for the same reason: nothing reads it, so keeping it longer only stores an address.
+ */
+export const DEFAULT_INVITATION_RETENTION_DAYS = 90;
 
 /** The `backup` sidecar's own defaults, mirrored so the two cannot silently disagree. */
 export const DEFAULT_BACKUP_INTERVAL_SECONDS = 86_400;
@@ -88,6 +100,8 @@ export interface CleanupCounts {
   activities: number;
   /** Deduplicated "somebody opened a board / the dashboard" rows — see `model UsagePing`. */
   usagePings: number;
+  /** Finished `WorkspaceInvitation` rows — the one table here holding a *third party's* address. */
+  invitations: number;
   /**
    * Files on disk with no row pointing at them, removed this run.
    *
@@ -141,6 +155,16 @@ export interface RetentionSettings {
   notificationDays: number;
   /** Days an activity row is kept after it was written. `0` disables the sweep. */
   activityDays: number;
+  /**
+   * Days a *finished* invitation is kept after it was created. `0` disables the sweep.
+   *
+   * Its own knob rather than a share of `NOTIFICATION_RETENTION_DAYS` even though the default
+   * is the same number: a self-hoster shortening the invitation window is answering a
+   * data-minimisation question about people who are not their users, and one shortening the
+   * notification window is tidying an inbox. Two decisions, and coupling them would mean an
+   * operator cannot make one without making the other.
+   */
+  invitationDays: number;
 }
 
 /**
@@ -171,6 +195,7 @@ export function retentionSettings(): RetentionSettings {
       DEFAULT_NOTIFICATION_RETENTION_DAYS,
     ),
     activityDays: retentionDays('ACTIVITY_RETENTION_DAYS', DEFAULT_ACTIVITY_RETENTION_DAYS),
+    invitationDays: retentionDays('INVITATION_RETENTION_DAYS', DEFAULT_INVITATION_RETENTION_DAYS),
   };
 }
 
@@ -183,9 +208,10 @@ export function cutoffFor(now: Date, days: number): Date {
  * The line this job exists to leave behind.
  *
  * Counts only. The rows being deleted are IP addresses, user agents, e-mail addresses in
- * `Verification.identifier` and notification payloads carrying task titles — precisely the
- * data the policy exists to remove from the database, so copying any of it into a log
- * aggregator on the way out would defeat the whole job. `docs/decisions/0020-data-retention.md`.
+ * `Verification.identifier` and `WorkspaceInvitation.email`, and notification payloads carrying
+ * task titles — precisely the data the policy exists to remove from the database, so copying any
+ * of it into a log aggregator on the way out would defeat the whole job.
+ * `docs/decisions/0020-data-retention.md`.
  *
  * The rule extends to the orphan sweep without an exception: a storage key is an attachment's
  * identity, so `orphanedFiles` is a number and never a list of paths.
@@ -329,6 +355,7 @@ export class CleanupWorker implements OnModuleInit, OnModuleDestroy {
       notifications: 0,
       activities: 0,
       usagePings: 0,
+      invitations: 0,
       orphanedFiles: 0,
     };
     if (!settings.enabled) return empty;
@@ -416,6 +443,58 @@ export class CleanupWorker implements OnModuleInit, OnModuleDestroy {
             `;
           });
 
+    // `WorkspaceInvitation.email` is the only personal datum in this schema that belongs to
+    // somebody who is not a user. An invitation sent to an address that never signed up leaves
+    // no `User` row, so account deletion cannot reach it (ADR 0026) and nothing else in the
+    // product deletes it either — the row simply stays, with a real address in it, forever.
+    // That is the shape of the finding this sweep closes: a table full of third parties' e-mail
+    // addresses kept for no purpose, which is exactly what GDPR 5(1)(e) and KVKK 4 forbid.
+    //
+    // **A row is a candidate once it is finished, not once it is old.** Two ways to be
+    // finished, and the `OR` is both of them: a `status` other than `pending` is a decision
+    // somebody made (accepted, rejected, canceled), and `expiresAt` in the past is the decision
+    // the clock made. A `pending` row whose expiry is still ahead of it is a live grant of
+    // access somebody can still accept, and it is exempt at **any** age — deleting one would
+    // silently withdraw an invitation an admin was told had been sent, and the settings screen
+    // (which lists exactly `pending` and unexpired) would stop showing it with nothing to say.
+    //
+    // The window runs from `createdAt` because it is the only timestamp this table has: there
+    // is no `resolvedAt` and Better Auth writes no `updatedAt` here. Measuring from creation
+    // rather than from resolution deletes the record slightly *earlier* than a `resolvedAt`
+    // would, and the gap is bounded by how long a row can stay pending — the invitation expiry,
+    // days rather than months. Adding a column to close a gap that size is not worth a
+    // migration; an instance whose invitation expiry ever approaches this window is the case to
+    // revisit it for.
+    //
+    // **No index for this predicate yet, and that is an open item rather than a precedent.**
+    // The precedent runs the other way: migration `20260814180000_retention_sweep_indexes`
+    // measured every sweep at production-like volume and *added* `Session_expiresAt_idx`,
+    // `Verification_expiresAt_idx` and `UsagePing_createdAt_idx` because those three were
+    // sequential scans paid nightly, forever; it left `Activity` and `Notification` alone only
+    // because their plans showed an existing composite already serving the sweep. The rule ADR
+    // 0020 and `20260814150000_drop_unused_indexes` (DB-07) established is "measure, then add or
+    // drop" — not "sweeps go unindexed". Nothing here has been measured, so what is claimed is
+    // only that `WorkspaceInvitation` is orders of magnitude smaller than those tables (one row
+    // per invitation ever sent, against one per event or per session) and that
+    // `@@index([workspaceId, email, status])` cannot serve this predicate anyway — it constrains
+    // neither `workspaceId` nor `email`, and `createdAt` is not in it. The same measurement is
+    // what should decide, on an instance where this table has grown enough to be worth taking.
+    const invitations =
+      settings.invitationDays === 0
+        ? 0
+        : await this.deleteInBatches(() => {
+            const cutoff = cutoffFor(now, settings.invitationDays);
+            return this.prisma.$executeRaw`
+              DELETE FROM "WorkspaceInvitation"
+              WHERE "id" IN (
+                SELECT "id" FROM "WorkspaceInvitation"
+                WHERE "createdAt" < ${cutoff}
+                  AND ("status" <> 'pending' OR "expiresAt" < ${now})
+                LIMIT ${CLEANUP_BATCH_SIZE}
+              )
+            `;
+          });
+
     // Last, and after the row sweeps on purpose: a row deleted above may be the last claim on a
     // file, so running the file pass afterwards makes that file a candidate tonight rather than
     // tomorrow night. It is also the only pass that touches something outside Postgres.
@@ -427,6 +506,7 @@ export class CleanupWorker implements OnModuleInit, OnModuleDestroy {
       notifications,
       activities,
       usagePings,
+      invitations,
       orphanedFiles,
     };
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;

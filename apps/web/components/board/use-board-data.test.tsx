@@ -192,6 +192,158 @@ describe('useBoardData task streaming', () => {
 
     await waitFor(() => expect(result.current.error).toBe("The board couldn't load."));
     expect(result.current.loading).toBe(false);
+    // A transient failure is worth another go, so the caller keeps its retry control.
+    expect(result.current.unavailable).toBe(false);
+  });
+
+  /**
+   * The error screen used to be a dead end: its button called `reload`, which re-ran the two
+   * fetches and never touched `error`, so a retry that *worked* left the failure on screen.
+   */
+  it('clears the error and paints the board when a retry succeeds', async () => {
+    drain.mockRejectedValueOnce(new Error('network'));
+
+    const { result } = renderBoardData();
+
+    await waitFor(() => expect(result.current.error).toBe("The board couldn't load."));
+
+    drain.mockImplementation(async (_ws, _board, _filters, options?: FetchBoardTasksOptions) => {
+      options?.onPage?.({ items: [task('a')], index: 0, hasMore: false });
+      return [task('a')];
+    });
+    act(() => result.current.retry());
+
+    await waitFor(() => expect(result.current.error).toBeNull());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.tasks.map((item) => item.id)).toEqual(['a']);
+    // The frame is re-read too, not just the tasks: a retry takes the *initial* branch.
+    expect(result.current.board).not.toBeNull();
+    expect(result.current.columns).toHaveLength(1);
+  });
+
+  /**
+   * The realtime resync path (`reload`) is the socket's heal path: it keeps running behind
+   * the error screen (nothing gates it on `error`), so a board that recovers on its own — the
+   * API came back before the user clicked anything — must not sit on a dead end once fresher
+   * data has actually landed.
+   */
+  it('clears the error when a realtime resync succeeds', async () => {
+    drain.mockRejectedValueOnce(new Error('network'));
+
+    const { result } = renderBoardData();
+
+    await waitFor(() => expect(result.current.error).toBe("The board couldn't load."));
+
+    drain.mockImplementation(async (_ws, _board, _filters, options?: FetchBoardTasksOptions) => {
+      options?.onPage?.({ items: [task('a')], index: 0, hasMore: false });
+      return [task('a')];
+    });
+    await act(() => result.current.reload());
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.unavailable).toBe(false);
+  });
+
+  /** A resync that fails must leave an existing error exactly as it was — nothing got fresher. */
+  it('leaves the error in place when a realtime resync fails', async () => {
+    drain.mockRejectedValueOnce(new Error('network'));
+
+    const { result } = renderBoardData();
+
+    await waitFor(() => expect(result.current.error).toBe("The board couldn't load."));
+
+    drain.mockRejectedValueOnce(new Error('still down'));
+    await expect(act(() => result.current.reload())).rejects.toThrow();
+
+    expect(result.current.error).toBe("The board couldn't load.");
+  });
+
+  /**
+   * The first retry succeeding is covered above; a retry can fail again too, and the caller
+   * (whose own button stays mounted either way) needs the failure re-reported rather than
+   * left stale from the attempt before it.
+   */
+  it('re-sets the error when a retry fails again', async () => {
+    drain.mockRejectedValueOnce(new Error('network'));
+
+    const { result } = renderBoardData();
+
+    await waitFor(() => expect(result.current.error).toBe("The board couldn't load."));
+
+    drain.mockRejectedValueOnce(new Error('still down'));
+    act(() => result.current.retry());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBe("The board couldn't load.");
+    expect(result.current.unavailable).toBe(false);
+  });
+
+  /** 404 and 403 are answers, not outages — retrying re-asks a settled question. */
+  it.each([404, 403])('offers no retry when the board answers %i', async (status) => {
+    drain.mockResolvedValue([]);
+    apiGet.mockImplementation((path: string) => {
+      if (/\/boards\/[^/]+$/.test(path)) {
+        return Promise.reject(
+          new ApiError({ statusCode: status, error: 'Denied', message: 'No board' }),
+        ) as never;
+      }
+      return Promise.resolve(metaResponse(path)) as never;
+    });
+
+    const { result } = renderBoardData();
+
+    await waitFor(() => expect(result.current.unavailable).toBe(true));
+    expect(result.current.error).toBe("This board doesn't exist, or you don't have access to it.");
+    expect(result.current.loading).toBe(false);
+  });
+});
+
+/**
+ * The derived-state guard that puts the skeleton back and clears a stale failure the moment
+ * the request changes, during render rather than at the top of the load effect (see its own
+ * doc comment in the hook). `setUnavailable(false)` is the one line this PR added to it; the
+ * rest of the guard was already here and, before this, was not under test at all.
+ */
+describe('useBoardData request changes while an error is showing', () => {
+  it('clears a stale unavailable error and shows the skeleton again for a new board id', async () => {
+    drain.mockResolvedValue([]);
+    apiGet.mockImplementation((path: string) => {
+      if (/\/boards\/[^/]+$/.test(path)) {
+        return Promise.reject(
+          new ApiError({ statusCode: 404, error: 'Not Found', message: 'No board' }),
+        ) as never;
+      }
+      return Promise.resolve(metaResponse(path)) as never;
+    });
+
+    const { result, rerender } = renderHook(
+      ({ boardId }: { boardId: string }) => useBoardData(boardId, NO_FILTERS, null),
+      {
+        initialProps: { boardId: BOARD_ID },
+        wrapper: ({ children }) => (
+          <NextIntlClientProvider locale="en" messages={messages}>
+            {children}
+          </NextIntlClientProvider>
+        ),
+      },
+    );
+
+    await waitFor(() => expect(result.current.unavailable).toBe(true));
+
+    apiGet.mockReset();
+    stubMeta();
+    drain.mockResolvedValue([]);
+    const OTHER_BOARD_ID = '0198e2c0-9a1b-7f04-8c3d-2b5e7a9c1d02';
+    rerender({ boardId: OTHER_BOARD_ID });
+
+    // The guard runs synchronously during the render that notices `boardId` changed — before
+    // the effect's own fetch for the new board has even started.
+    expect(result.current.error).toBeNull();
+    expect(result.current.unavailable).toBe(false);
+    expect(result.current.loading).toBe(true);
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBeNull();
   });
 });
 

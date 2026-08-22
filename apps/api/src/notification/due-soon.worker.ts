@@ -5,6 +5,7 @@ import { envString } from '../common/env';
 import { captureServerError } from '../common/observability/sentry';
 import { parseRedisUrl, type RedisConnectionOptions } from '../common/redis-url';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationMailer, type NotificationMailInput } from './notification-mailer';
 import { NotificationService } from './notification.service';
 
 const QUEUE_NAME = 'due-soon';
@@ -47,6 +48,7 @@ export class DueSoonWorker implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationService,
+    private readonly mailer: NotificationMailer,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -141,6 +143,8 @@ export class DueSoonWorker implements OnModuleInit, OnModuleDestroy {
     // hand the same user a burst of identical "your count changed" signals, and each one costs
     // that browser an unread-count request.
     const recipientsByWorkspace = new Map<string, Set<string>>();
+    // Emails, unlike signals, are one per row: each reminder names one card.
+    const mails: NotificationMailInput[] = [];
 
     for (;;) {
       const tasks: ScanTaskRow[] = await this.prisma.task.findMany({
@@ -175,6 +179,13 @@ export class DueSoonWorker implements OnModuleInit, OnModuleDestroy {
         const users = recipientsByWorkspace.get(recipient.workspaceId) ?? new Set<string>();
         users.add(recipient.userId);
         recipientsByWorkspace.set(recipient.workspaceId, users);
+        mails.push({
+          workspaceId: recipient.workspaceId,
+          userId: recipient.userId,
+          actorId: null,
+          type: NotificationType.DueSoon,
+          taskId: recipient.taskId,
+        });
       }
 
       if (tasks.length < SCAN_BATCH_SIZE) break;
@@ -188,6 +199,7 @@ export class DueSoonWorker implements OnModuleInit, OnModuleDestroy {
     for (const [workspaceId, users] of recipientsByWorkspace) {
       this.notifications.emitUnreadChanged(workspaceId, [...users]);
     }
+    await this.mailer.sendForCreated(mails);
 
     return totalCreated;
   }
@@ -228,7 +240,10 @@ export class DueSoonWorker implements OnModuleInit, OnModuleDestroy {
   private async notifyBatch(
     tasks: ScanTaskRow[],
     since: Date,
-  ): Promise<{ created: number; recipients: Array<{ workspaceId: string; userId: string }> }> {
+  ): Promise<{
+    created: number;
+    recipients: Array<{ workspaceId: string; userId: string; taskId: string }>;
+  }> {
     const pairs = tasks.flatMap((task) =>
       task.dueDate === null
         ? []
@@ -277,7 +292,11 @@ export class DueSoonWorker implements OnModuleInit, OnModuleDestroy {
     if (result.count === 0) return { created: 0, recipients: [] };
     return {
       created: result.count,
-      recipients: rows.map((row) => ({ workspaceId: row.workspaceId, userId: row.userId })),
+      recipients: rows.map((row) => ({
+        workspaceId: row.workspaceId,
+        userId: row.userId,
+        taskId: row.taskId,
+      })),
     };
   }
 

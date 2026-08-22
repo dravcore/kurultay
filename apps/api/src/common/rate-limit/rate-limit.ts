@@ -46,8 +46,13 @@ export const TASK_SEARCH_RATE_LIMIT = 30;
  * This ceiling is named as insufficient rather than pretended to be enough (ADR 0022): the
  * throttler counts requests per IP per route, which is the wrong unit twice here — twenty
  * 25 MiB uploads and twenty 10 kB uploads spend the same budget, and an office behind one NAT
- * shares a bucket. The real ceiling is `limits.fileSize` plus a per-workspace quota that does
- * not exist yet. Overriding `ThrottlerGuard.getTracker` is deliberately not attempted.
+ * shares a bucket. Since 2026-08-21 the route also carries the unit that was missing: a per-IP
+ * byte budget (`ATTACHMENT_UPLOAD_BYTES_PER_MINUTE`, `UploadBudgetGuard`, 256 MiB a minute by
+ * default) charged before multer reads the body, and the storage quotas
+ * (`ATTACHMENT_WORKSPACE_QUOTA_BYTES` / `ATTACHMENT_INSTANCE_QUOTA_BYTES`, ADR 0027) now have
+ * finite defaults, so an unconfigured instance is bounded in total as well as per request. This
+ * request count stays as the cheap first brake in front of the session lookup. Overriding
+ * `ThrottlerGuard.getTracker` is deliberately not attempted.
  */
 export const ATTACHMENT_UPLOAD_RATE_LIMIT = 20;
 

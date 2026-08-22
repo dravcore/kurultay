@@ -3,6 +3,14 @@
 **Status:** Accepted
 **Date:** 2026-08-08
 **Updated:** 2026-08-08 — records Prisma 7's breaking changes, and pins PostgreSQL 18 / Redis 8 with the licensing reason.
+**Updated:** 2026-08-18 — "HTTP rate limiting is not wired yet" (Rationale, below) is stale. A
+global `ThrottlerModule` + `ThrottlerGuard` (`apps/api/src/app.module.ts`) now bounds every HTTP
+request, and Better Auth carries a second, Redis-backed limiter of its own on top for its own
+routes (`apps/api/src/auth/auth-rate-limit.ts`) — since #277, that one degrades to a bounded
+per-process in-memory counter on a Redis error rather than failing open (audit finding SEC-03).
+The nuance that survives: the Nest `ThrottlerModule` itself still does not use Redis — its
+counters are the library's default in-memory store, so only Better Auth's own limiter is a Redis
+job, not the API's general-purpose one.
 
 > 🌐 English (canonical) | [Türkçe](../tr/decisions/0002-backend-stack.md)
 

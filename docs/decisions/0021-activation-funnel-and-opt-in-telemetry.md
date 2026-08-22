@@ -8,9 +8,9 @@
 ## Context
 
 Kurul measured nothing about its own use. A grep for `telemetry`, `analytics`, `posthog`,
-`plausible` or `umami` across `apps/` and `docs/` returned zero matches in source, and
-`docs/roadmap.md` listed no metrics item under "Beyond MVP". So every product question was
-answered by intuition:
+`plausible` or `umami` across `apps/` and `docs/` returned zero matches in source, and the
+roadmap (now [ROADMAP.md](../../ROADMAP.md)) listed no metrics item under "Beyond MVP". So every
+product question was answered by intuition:
 
 - Where does onboarding break — sign-up, workspace, board, first card, first invite?
 - Do invitations convert, and when they do not, is that the invite flow or an instance with no
@@ -70,7 +70,7 @@ more _current_ members left a trace in the last seven days. Returned alongside t
 figures (weekly active workspaces of any size, and workspaces with 2+ members at all), because
 "3" is excellent out of four team workspaces and a crisis out of four hundred.
 
-**Who may read it: `INSTANCE_ADMIN_EMAILS`, empty by default, meaning nobody.** This is the
+**Who may read it: `INSTANCE_ADMIN_EMAILS` (grant once those accounts' emails are verified), empty by default, meaning nobody.** This is the
 only authorisation boundary in the codebase that is not a workspace role, and it exists because
 the funnel is the first thing that legitimately reads across tenants.
 
@@ -125,7 +125,8 @@ PR #188 mistake repeated — a payload, or a page, must never widen who can read
 instance-wide counts are something no workspace member was ever entitled to. Configuration is
 the honest boundary: whoever can read `DATABASE_URL` may name the accounts that see
 instance-wide numbers. Empty by default means a fresh install shows this to nobody, including
-its own owner, until somebody writes an address into `.env` on purpose.
+its own owner, until somebody writes an address into `.env` on purpose, and access is gated
+further by requiring those accounts' email addresses to be verified.
 
 **Why telemetry is off, and why it carries no instance id.** Off by default is not a courtesy;
 it is the only default compatible with what self-hosted software is _for_. A user who has to
@@ -168,7 +169,7 @@ conversation is already settled the day there _is_ a collector, and so an operat
 send their own instance's heartbeat somewhere has a supported way to do it.
 
 **What an operator has to do to see any of this.** Set `INSTANCE_ADMIN_EMAILS` to their own
-address and reload the settings screen. Doing nothing leaves the funnel computed-but-unreadable
+address, verify that account's email, and reload the settings screen. Doing nothing leaves the funnel computed-but-unreadable
 and the ping unsent, which is the correct behaviour for somebody who never asked for either.
 
 ## Alternatives considered

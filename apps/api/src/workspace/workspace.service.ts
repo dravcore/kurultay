@@ -121,8 +121,8 @@ export class WorkspaceService {
    *
    * The deleted-account check is the reason `userId` is no longer unused. This is one of the
    * two writes in the API that are not workspace-scoped, and it is the dangerous one: an
-   * account deleted by an instance administrator keeps a working session cookie for up to five
-   * minutes (Better Auth's `session.cookieCache` answers without a database read), and creating
+   * account deleted by an instance administrator keeps a working session cookie for up to 60
+   * seconds (Better Auth's `session.cookieCache` answers without a database read), and creating
    * a workspace is the one thing in that window that would give the tombstone a membership
    * again — an anonymised row with no credentials, sitting as the sole owner of a live tenant.
    * See `common/deleted-account.ts` for why the check is here rather than in `SessionAuthGuard`.

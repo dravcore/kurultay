@@ -2,6 +2,10 @@
 
 **Durum:** Kabul edildi
 **Tarih:** 2026-08-12
+**Güncellendi:** 2026-08-21: Sonuçlar bölümündeki, `dashboard.service.ts`'in `category: 'COMPLETED'`'a
+geçişinin "mevcut `perf/api-scale-debt` dalı merge olana kadar bekler" notu artık güncel değil:
+`Column.category` yayına girdi (`schema.prisma`, `dashboard.service.ts`) ve web bunu, aynı bölümün
+zaten belirttiği gibi `column-settings-dialog.tsx` içinde kullanıcıya açıyor.
 
 > 🌐 [English (kanonik)](../../decisions/0019-column-category.md) | Türkçe
 

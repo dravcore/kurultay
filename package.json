@@ -1,7 +1,7 @@
 {
   "name": "kurul",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Open-source Kanban-focused project management",
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@9.15.9",
@@ -9,17 +9,20 @@
     "node": ">=24"
   },
   "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs",
     "dev": "pnpm -r --parallel --filter @kurul/api --filter @kurul/web dev",
     "build": "pnpm -r --filter @kurul/shared-types --filter @kurul/auth-access --filter @kurul/api --filter @kurul/web build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r --filter @kurul/api --filter @kurul/web --filter @kurul/shared-types --filter @kurul/auth-access test",
     "test:browser": "node e2e/build-stack.mjs && pnpm --filter @kurul/e2e exec playwright test",
+    "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "typecheck": "pnpm --filter @kurul/shared-types build && pnpm --filter @kurul/auth-access build && pnpm -r typecheck",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
+    "db:drift": "prisma migrate diff --from-config-datasource --to-schema apps/api/prisma/schema.prisma --exit-code",
     "openapi": "pnpm --filter @kurul/api build && pnpm --filter @kurul/api openapi",
     "openapi:check": "pnpm --filter @kurul/api openapi:check",
     "format": "prettier --write .",
@@ -54,7 +57,8 @@
   },
   "pnpm": {
     "overrides": {
-      "js-yaml": "^5.2.2"
+      "js-yaml": "^5.2.2",
+      "deepmerge-ts": "^8.0.1"
     },
     "peerDependencyRules": {
       "allowedVersions": {

@@ -5,15 +5,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Ideas are wanted. Implementations, for now, are not.**
+        **Describe the problem, who it affects, and how you would expect it to behave.**
 
-        Describe the problem, who it affects, and how you would expect it to behave — that is
-        the most useful thing you can send and it is what shapes the roadmap. Please keep
-        **code out of the thread**, though: a snippet is your copyrighted work, and while the
-        Contributor License Agreement is still in draft the maintainer cannot safely read one
-        and then write the feature.
+        That is what shapes the roadmap, and an idea with upvotes on it is the strongest signal
+        this project takes. Implementations are welcome too: Kurul is issue-first, so propose
+        here, wait for maintainer feedback, then open the pull request.
 
-        See [CONTRIBUTING.md](https://github.com/dravcore/kurul/blob/develop/CONTRIBUTING.md#code-contributions-are-paused).
+        See [CONTRIBUTING.md](https://github.com/dravcore/kurul/blob/develop/CONTRIBUTING.md).
 
   - type: checkboxes
     id: existing-issue

@@ -102,7 +102,7 @@ export class Stack {
       `verification link was rejected (redirected to ${location || '<nothing>'})`,
     ).not.toContain('error=');
 
-    // Better Auth caches the session payload in a cookie for five minutes, so the context is
+    // Better Auth caches the session payload in a cookie for 60 seconds, so the context is
     // still presenting `emailVerified: false` at this point. Signing in again is what makes
     // the freshly confirmed address visible to the invitation guard.
     const signIn = await api.post('/auth/sign-in/email', {

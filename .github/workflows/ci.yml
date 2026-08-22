@@ -9,6 +9,9 @@ on:
   pull_request:
     branches: ['**']
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -84,10 +87,17 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
         run: pnpm db:generate
-      - name: Build shared packages
-        run: pnpm --filter @kurul/shared-types build && pnpm --filter @kurul/auth-access build
+      # No shared-package build here, on purpose. Jest and Vitest map `@kurul/shared-types` and
+      # `@kurul/auth-access` to the packages' `src`, and this job running without a `dist` is
+      # what keeps that true: a test that quietly started reading the build again would fail
+      # here with "Cannot find module" instead of passing against stale output. The lint job
+      # still builds them, because `pnpm typecheck` resolves the packages through `dist`.
       - name: Unit tests (shared packages)
         run: pnpm --filter "./packages/*" test
+      # `scripts/` has no dependencies and is not a workspace package, so nothing under
+      # `pnpm -r` reaches it; its tests run on `node:test`.
+      - name: Unit tests (scripts)
+        run: pnpm test:scripts
       - name: Unit tests with coverage
         run: |
           pnpm --filter @kurul/api test:cov
@@ -115,11 +125,7 @@ jobs:
       # migration. `--exit-code` returns 2 when the diff is non-empty, so the gate is the
       # command's own answer rather than a grep over its prose.
       - name: Check for migration drift
-        run: >
-          pnpm exec prisma migrate diff
-          --from-config-datasource
-          --to-schema apps/api/prisma/schema.prisma
-          --exit-code
+        run: pnpm db:drift
       - name: Integration tests
         run: pnpm --filter @kurul/api test:e2e
 
@@ -165,6 +171,107 @@ jobs:
       - name: Check for OpenAPI specification drift
         run: pnpm openapi:check
 
+  # -----------------------------------------------------------------------------------
+  # ROADMAP.md, Hardening track: every PR builds the images this project ships and fails on a
+  # HIGH/CRITICAL CVE. Until now the only thing that ever built a Dockerfile was
+  # release-images.yml, which runs on a tag push, so a broken build or a vulnerable base image
+  # was discovered at release time, by the workflow whose whole job is to publish it.
+  #
+  # There is no `needs:` on purpose. Chaining this behind `build` would add its entire duration
+  # to the pipeline's critical path, and the PR pipeline on `develop` already measures
+  # 4m56s-5m18s against the five-minute trigger recorded for OPS-10 in ROADMAP.md. Run beside
+  # `lint` and `test`, it costs runner minutes rather than wall time for as long as the slowest
+  # leg stays under `test`.
+  #
+  # Three legs, not two: apps/api/Dockerfile ships two images. `migrate` is a real published
+  # artifact (docker-compose.yml runs it as a one-shot service against the production database)
+  # and it carries a different dependency set from `runner`, the Prisma CLI and what
+  # prisma.config.ts imports rather than the Nest runtime, so a CVE in it is invisible to a scan
+  # of `runner`. It gets its own leg rather than a second build step inside the api leg so the
+  # two builds stay parallel and a red check names the image that is actually vulnerable.
+  # -----------------------------------------------------------------------------------
+  image-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      # Checkout, the Trivy release download and the actions cache, and nothing else. No image
+      # leaves this job, so there is no `packages: write` and no `docker/login-action`.
+      contents: read
+    strategy:
+      # The three images share no build output that matters here, and a CVE in one says nothing
+      # about the others: a failing leg must not hide what the other legs found.
+      fail-fast: false
+      matrix:
+        include:
+          - image: kurul-api
+            dockerfile: apps/api/Dockerfile
+            target: runner
+            # One cache scope per image, with exactly one writer. `migrate` and `runner` descend
+            # from the same `base` and `build` stages of apps/api/Dockerfile, so the migrate leg
+            # reads everything expensive (pnpm install, prisma generate, nest build) out of the
+            # runner leg's scope and rebuilds only its own three COPY layers. Two legs exporting
+            # into one scope during the same run would instead race on that scope's index and
+            # each drop part of what the other wrote.
+            cache-to: type=gha,scope=pr-kurul-api,mode=max
+          - image: kurul-api
+            dockerfile: apps/api/Dockerfile
+            target: migrate
+            cache-to: ''
+          - image: kurul-web
+            dockerfile: apps/web/Dockerfile
+            target: runner
+            cache-to: type=gha,scope=pr-kurul-web,mode=max
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # `push: false` with `load: true`: the image is built into this runner's own daemon for
+      # Trivy to read and is discarded with the runner. Publishing stays where it belongs, in
+      # release-images.yml, behind a tag.
+      #
+      # The gha cache a pull request writes is scoped to that pull request and discarded on
+      # merge; what makes a PR's first run fast is the cache written by this same workflow's run
+      # on `develop` (it triggers on `push` there too), which every branch cut from develop can
+      # read.
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # Pinned rather than left to "last stage wins", for the same reason release-images.yml
+          # pins it: a stage appended after `runner` must not silently retarget this.
+          target: ${{ matrix.target }}
+          push: false
+          load: true
+          tags: ${{ matrix.image }}:${{ matrix.target }}
+          # The docker exporter behind `load:` cannot carry attestations, and nothing here reads
+          # one. Provenance and SBOMs are decided in release-images.yml, over the artifact that
+          # is actually published.
+          provenance: false
+          cache-from: type=gha,scope=pr-${{ matrix.image }}
+          cache-to: ${{ matrix.cache-to }}
+
+      # `ignore-unfixed: true` is what separates a gate from a permanent red mark. node:24-alpine
+      # carries HIGH and CRITICAL advisories for which no fixed version exists in any package the
+      # image could move to, so without it every pull request fails for something no pull request
+      # can fix, and a check that is always red is a check everyone learns to click past. What
+      # remains is exactly the actionable set: a HIGH or CRITICAL that has a fix, which is either
+      # a base image bump or a dependency bump, i.e. work this PR can actually do.
+      #
+      # `format: table` prints the findings into the job log. SARIF upload into code scanning is
+      # deliberately not used: it needs `security-events: write` and it reports asynchronously,
+      # which is the wrong shape for a check that has to be red before the merge button is.
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}:${{ matrix.target }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          # Keeps the vulnerability database in the actions cache instead of pulling it from
+          # ghcr.io on every leg of every run. That download is both the slow path and the one
+          # that meets an anonymous pull rate limit first.
+          cache: true
+
   ci-ok:
     # Gate job: the single required status check. `if: always()` is the whole point —
     # a `needs` job that is skipped (e.g. via concurrency cancel) or cancelled still runs
@@ -173,7 +280,7 @@ jobs:
     # skip the gate job entirely and report it as "passed" — the exact failure mode from
     # PR #89 (https://github.com/dravcore/kurul/pull/89).
     if: always()
-    needs: [lint, test, build]
+    needs: [lint, test, build, image-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Decide gate result
@@ -186,13 +293,17 @@ jobs:
           results[lint]="${{ needs.lint.result }}"
           results[test]="${{ needs.test.result }}"
           results[build]="${{ needs.build.result }}"
+          # `results` is an associative array (`declare -A`), so a hyphen in the key is a
+          # plain character and not an arithmetic subtraction the way it would be in an
+          # indexed array.
+          results[image-scan]="${{ needs.image-scan.result }}"
 
           # Log each result for diagnosis: if a PR fails, the developer needs to know which
           # job failed, what its result status was, and whether it was actually a failure
           # or a skip/cancel (GitHub's skipped jobs are not a failure in the normal sense,
           # but they halt the pipeline and must be treated as if they were).
           echo "Gate check results:"
-          for job in lint test build; do
+          for job in lint test build image-scan; do
             echo "  $job: ${results[$job]}"
           done
 
@@ -202,7 +313,7 @@ jobs:
           # - cancelled: the workflow was cancelled by the user or timed out.
           # Using contains(needs.*.result, 'failure') would miss skipped and cancelled.
           failure=0
-          for job in lint test build; do
+          for job in lint test build image-scan; do
             if [[ "${results[$job]}" != "success" ]]; then
               echo "ERROR: $job did not succeed (result: ${results[$job]})"
               failure=1

@@ -1,14 +1,24 @@
 import { INestApplication } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule, type TestingModuleBuilder } from '@nestjs/testing';
 import { App } from 'supertest/types';
 import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/common/configure-app';
 import { resolveTrustProxySetting } from '../../src/common/trust-proxy';
 
-export async function createTestApp(): Promise<INestApplication<App>> {
-  const moduleFixture: TestingModule = await Test.createTestingModule({
-    imports: [AppModule],
-  }).compile();
+export interface TestAppOptions {
+  /**
+   * A hook for `overrideProvider(...)` and friends, applied before the module compiles.
+   *
+   * The one caller today swaps `MailService` for a capturing fake so a spec can assert on what
+   * would have been sent. Process-wide state (`SMTP_HOST`, the transport singleton) stays
+   * untouched on purpose: a spec that flips those flips them for every other spec in the run.
+   */
+  configure?: (builder: TestingModuleBuilder) => TestingModuleBuilder;
+}
+
+export async function createTestApp(options: TestAppOptions = {}): Promise<INestApplication<App>> {
+  const builder = Test.createTestingModule({ imports: [AppModule] });
+  const moduleFixture: TestingModule = await (options.configure?.(builder) ?? builder).compile();
 
   const app = moduleFixture.createNestApplication();
   configureApp(app, {

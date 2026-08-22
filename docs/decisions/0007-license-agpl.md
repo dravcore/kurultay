@@ -6,8 +6,9 @@
 > 🌐 English (canonical) | [Türkçe](../tr/decisions/0007-license-agpl.md)
 
 > **Follow-up:** the commercial model left open below is settled in
-> [0014](0014-dual-licensing-cla.md) — dual licensing rather than open core, plus a CLA. 0014
-> complements this record; it does not supersede it.
+> [0028](0028-open-contributions-hosted-service.md): AGPL-3.0 stays, and the business is an
+> optional hosted service run by Dravcore rather than dual licensing (which 0014 proposed and
+> 0028 abandoned). 0028 complements this record; it does not supersede it.
 
 ## Context
 

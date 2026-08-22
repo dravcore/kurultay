@@ -30,7 +30,7 @@ Frontend; interaktif bir kanban board'u (drag-and-drop ile yeniden sıralama), s
 - Recharts'ın sade API'siyle dashboard'lar hızlıca yayına alınıyor.
 - Board etkileşimleri daha karmaşıklaştıkça (nested sortable'lar, çok kolonlu drag) `@dnd-kit`'in collision detection'ı özel ayarlama gerektirebilir — ve klasik hat için gelecek bir upstream fix yok, dolayısıyla her ayarlama bize ait.
 - Etrafından dolaşamayacağımız bir `@dnd-kit` bug'ı bu kararın kabul ettiği başarısızlık modu. **Yeniden değerlendirme tetikleyicisi: Faz 4'te**
-  ([roadmap.md](../../archive/roadmap-mvp-phases.md)), board etkileşimi gerçekten inşa edildiğinde, ya da böyle bir bug daha erken ortaya çıkarsa veya `@dnd-kit/react` 1.0'a ulaşırsa daha erken. Göç hedefi
+  (MVP yol haritasının Faz 4'ü; checklist'i artık yalnızca git geçmişinde), board etkileşimi gerçekten inşa edildiğinde, ya da böyle bir bug daha erken ortaya çıkarsa veya `@dnd-kit/react` 1.0'a ulaşırsa daha erken. Göç hedefi
   `pragmatic-drag-and-drop`, "collision detection yaz" olarak maliyetlendirildi, "board'u yeniden mimarile" olarak değil.
 - **Faz 4 yeniden değerlendirme (2026-08-09):** klasik `@dnd-kit` çok kolonlu board'u taşıdı; bloklayıcı çıkmadı — **pin'li klasik hat korunuyor**. Yalnızca donmuş hat bir bug'ı sonraki etkileşimi engellerse veya `@dnd-kit/react` net göç yoluyla 1.0'a ulaşırsa yeniden bak.
 - Recharts'ın bağımlılık yüzeyi analitik özellikler genişledikçe yeniden ele alınmalı — bu bir gözden kaçırma değil, bilinçli bir "sonra tekrar bak" trade-off'u.

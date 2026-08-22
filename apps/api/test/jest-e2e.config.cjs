@@ -7,6 +7,15 @@ module.exports = {
   testEnvironment: 'node',
   testRegex: '.e2e-spec.ts$',
   setupFiles: [path.join(__dirname, 'setup-e2e.ts')],
+  // Keep in sync with `apps/api/jest.config.cjs`, which explains each entry: the workspace
+  // packages are read from `src`, never from a built (and possibly stale) `dist`, and the
+  // `.js` suffix their NodeNext sources use on relative imports is stripped so Jest can
+  // resolve them to `.ts`.
+  moduleNameMapper: {
+    '^@kurul/shared-types$': '<rootDir>/../../../packages/shared-types/src/index.ts',
+    '^@kurul/auth-access$': '<rootDir>/../../../packages/auth-access/src/index.ts',
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
   transform: {
     '^.+\\.(t|j|mj)sx?$': [
       require.resolve('ts-jest'),
@@ -22,6 +31,12 @@ module.exports = {
           // `pnpm typecheck` and `nest build`, which are unaffected by this override.
           module: 'CommonJS',
           moduleResolution: 'Node',
+          // Same `paths` as `apps/api/jest.config.cjs`, for the same reason (see the note
+          // there): ts-jest's type resolution must agree with `moduleNameMapper` above.
+          paths: {
+            '@kurul/shared-types': ['../../packages/shared-types/src/index.ts'],
+            '@kurul/auth-access': ['../../packages/auth-access/src/index.ts'],
+          },
         },
       },
     ],

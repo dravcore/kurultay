@@ -97,6 +97,8 @@ export function BoardView({ boardId, selectedTaskId = null }: BoardViewProps): R
     loading,
     tasksSyncing,
     error,
+    unavailable,
+    retry,
     panelLoading,
     panelError,
     retryPanelTask,
@@ -216,7 +218,10 @@ export function BoardView({ boardId, selectedTaskId = null }: BoardViewProps): R
   }
 
   if (error || !board) {
-    return <BoardErrorState message={error} onRetry={() => void reload()} />;
+    // A board that is gone or not ours has nothing to try again, so it gets the message and
+    // the way out only. Everything else gets `retry`, which re-runs the load *and* clears the
+    // error — the old wiring called `reload`, which left this screen up on success.
+    return <BoardErrorState message={error} onRetry={unavailable ? undefined : retry} />;
   }
 
   const panelOpen = selectedTaskId !== null;

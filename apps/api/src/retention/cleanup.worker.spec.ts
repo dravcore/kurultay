@@ -28,6 +28,7 @@ const RETENTION_ENV = [
   'CLEANUP_ENABLED',
   'NOTIFICATION_RETENTION_DAYS',
   'ACTIVITY_RETENTION_DAYS',
+  'INVITATION_RETENTION_DAYS',
   'REDIS_URL',
   // The orphan sweep's grace period is BACKUP_KEEP × BACKUP_INTERVAL, so these two are as much
   // retention configuration as the windows above are.
@@ -126,9 +127,9 @@ describe('CleanupWorker', () => {
   }
 
   describe('what it selects', () => {
-    it('sweeps all five tables in one run and reports each table separately', async () => {
+    it('sweeps all six tables in one run and reports each table separately', async () => {
       process.env.CLEANUP_ENABLED = 'true';
-      const { worker, executeRaw } = buildWorker([3, 2, 7, 5, 4]);
+      const { worker, executeRaw } = buildWorker([3, 2, 7, 5, 4, 6]);
 
       await expect(worker.runCleanup(NOW)).resolves.toEqual({
         sessions: 3,
@@ -136,12 +137,20 @@ describe('CleanupWorker', () => {
         notifications: 7,
         activities: 5,
         usagePings: 4,
+        invitations: 6,
         orphanedFiles: 0,
       });
 
       // One statement per table: each batch came back short, so no table looped.
-      expect(executeRaw).toHaveBeenCalledTimes(5);
-      for (const table of ['Session', 'Verification', 'Notification', 'Activity', 'UsagePing']) {
+      expect(executeRaw).toHaveBeenCalledTimes(6);
+      for (const table of [
+        'Session',
+        'Verification',
+        'Notification',
+        'Activity',
+        'UsagePing',
+        'WorkspaceInvitation',
+      ]) {
         expect(callsFor(executeRaw, table)).toHaveLength(1);
       }
     });
@@ -241,6 +250,49 @@ describe('CleanupWorker', () => {
       expect(call![1]).toEqual(new Date(NOW.getTime() - 365 * DAY_MS));
     });
 
+    /**
+     * The invitation sweep is the only one whose predicate has two ways to match, and getting
+     * either half wrong is silent: drop the `status` half and a canceled invitation keeps its
+     * invitee's address forever, drop the expiry half and an abandoned `pending` row does. The
+     * `AND "createdAt" <` is what keeps both halves inside a window rather than immediate.
+     */
+    it('deletes a finished WorkspaceInvitation on the invitation window, measured from createdAt', async () => {
+      process.env.CLEANUP_ENABLED = 'true';
+      delete process.env.INVITATION_RETENTION_DAYS;
+      const { worker, executeRaw } = buildWorker();
+
+      await worker.runCleanup(NOW);
+
+      const [call] = callsFor(executeRaw, 'WorkspaceInvitation');
+      const statement = statementOf(call!);
+      expect(statement).toContain('WHERE "createdAt" < ?');
+      // Finished either because somebody decided, or because the clock did.
+      expect(statement).toContain('AND ("status" <> \'pending\' OR "expiresAt" < ?)');
+      // Default window: 90 days, not the activity year.
+      expect(call![1]).toEqual(new Date(NOW.getTime() - 90 * DAY_MS));
+      // The expiry half compares against the sweep instant itself, not against the cutoff — an
+      // invitation that expired yesterday is finished today, and the window is what then
+      // decides how long the finished record is kept.
+      expect(call![2]).toEqual(NOW);
+    });
+
+    it('honours INVITATION_RETENTION_DAYS independently of the notification window', async () => {
+      process.env.CLEANUP_ENABLED = 'true';
+      process.env.INVITATION_RETENTION_DAYS = '30';
+      process.env.NOTIFICATION_RETENTION_DAYS = '90';
+      const { worker, executeRaw } = buildWorker();
+
+      await worker.runCleanup(NOW);
+
+      expect(callsFor(executeRaw, 'WorkspaceInvitation')[0]![1]).toEqual(
+        new Date(NOW.getTime() - 30 * DAY_MS),
+      );
+      // Same default number, separate decision: moving one must not move the other.
+      expect(callsFor(executeRaw, 'Notification')[0]![1]).toEqual(
+        new Date(NOW.getTime() - 90 * DAY_MS),
+      );
+    });
+
     it('bounds every statement with the batch size', async () => {
       process.env.CLEANUP_ENABLED = 'true';
       const { worker, executeRaw } = buildWorker();
@@ -279,6 +331,17 @@ describe('CleanupWorker', () => {
       expect(callsFor(executeRaw, 'Activity')).toHaveLength(0);
     });
 
+    it('issues no WorkspaceInvitation statement when INVITATION_RETENTION_DAYS is 0', async () => {
+      process.env.CLEANUP_ENABLED = 'true';
+      process.env.INVITATION_RETENTION_DAYS = '0';
+      const { worker, executeRaw } = buildWorker();
+
+      const counts = await worker.runCleanup(NOW);
+
+      expect(counts.invitations).toBe(0);
+      expect(callsFor(executeRaw, 'WorkspaceInvitation')).toHaveLength(0);
+    });
+
     it('refuses a negative window instead of turning it into a cutoff in the future', () => {
       process.env.ACTIVITY_RETENTION_DAYS = '-1';
 
@@ -298,6 +361,7 @@ describe('CleanupWorker', () => {
         notifications: 0,
         activities: 0,
         usagePings: 0,
+        invitations: 0,
         orphanedFiles: 0,
       });
       expect(executeRaw).not.toHaveBeenCalled();
@@ -532,7 +596,7 @@ describe('CleanupWorker', () => {
   describe('the log line', () => {
     it('emits one JSON line carrying the per-table counts and nothing from the rows', async () => {
       process.env.CLEANUP_ENABLED = 'true';
-      const { worker, lines } = buildWorker([3, 2, 7, 5, 4]);
+      const { worker, lines } = buildWorker([3, 2, 7, 5, 4, 6]);
 
       await worker.runCleanup(NOW);
 
@@ -546,6 +610,7 @@ describe('CleanupWorker', () => {
         notifications: 7,
         activities: 5,
         usagePings: 4,
+        invitations: 6,
       });
       expect(typeof line.ts).toBe('string');
       expect(typeof line.durationMs).toBe('number');
@@ -556,6 +621,7 @@ describe('CleanupWorker', () => {
         'activities',
         'durationMs',
         'event',
+        'invitations',
         'level',
         'notifications',
         'orphanedFiles',

@@ -8,6 +8,7 @@ import type { WorkspaceDto } from '@kurul/shared-types';
 import { api, resolveApiMessage } from '@/lib/api';
 import { authClient } from '@/lib/auth';
 import { disconnectSocket } from '@/lib/socket';
+import { SubmitError } from '@/components/common/submit-error';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -109,7 +110,7 @@ export function DeleteWorkspaceDialog({
             aria-invalid={typedName.length > 0 && !confirmed}
           />
         </div>
-        {error ? <p className="text-body text-destructive">{error}</p> : null}
+        {error ? <SubmitError message={error} /> : null}
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             {t('cancel')}

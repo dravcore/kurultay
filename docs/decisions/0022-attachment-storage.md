@@ -9,7 +9,7 @@
 
 Kurul has been telling people it cannot do this, and telling them why. `README.md` lists "no
 task attachments" among the things the product is not at `v0.1.0` and points at
-[roadmap.md — Beyond MVP](../roadmap.md#beyond-mvp), where the entry reads `Task attachments —
+[ROADMAP.md — Beyond MVP](../../ROADMAP.md#beyond-mvp), where the entry reads `Task attachments —
 Needs an object-storage decision (ADR)`. [tech-stack.md](../tech-stack.md) says the same thing
 from the other side: "File attachments are out of MVP scope. When added, pick an S3-compatible
 store." This document is the decision both of them are waiting on.
@@ -134,7 +134,7 @@ tenant isolation. Skipping it costs specifically: `@Public()` leaves `request.us
 makes `WorkspaceGuard` throw before it can check membership, so `@WorkspaceScoped()` becomes
 unusable and the tenant check becomes a hand-written copy of `workspaceMember.findUnique` —
 including the 404-not-403 rule that keeps attachment existence from leaking. It also has no
-revocation: a removed member's session stops working within the five-minute cookie cache, while
+revocation: a removed member's session stops working within the 60-second cookie cache, while
 a distributed signed URL stays valid until its TTL expires. In the published image's topology —
 one origin, `/api` path, `SameSite=Lax` — cookies ride along on `<img src="/api/…">` and
 `<a download>` without any of that, so the advantage a signed URL exists to provide is already

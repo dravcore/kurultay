@@ -9,8 +9,8 @@
 
 Kurul kendi kullanımı hakkında hiçbir şey ölçmüyordu. `apps/` ve `docs/` altında
 `telemetry`, `analytics`, `posthog`, `plausible`, `umami` araması kaynak kodda sıfır eşleşme
-veriyordu; `docs/roadmap.md`'nin "Beyond MVP" listesinde metrik maddesi yoktu. Dolayısıyla her
-ürün sorusu sezgiyle yanıtlanıyordu:
+veriyordu; roadmap'in (bugünkü [ROADMAP.md](../../../ROADMAP.md)) "Beyond MVP" listesinde metrik
+maddesi yoktu. Dolayısıyla her ürün sorusu sezgiyle yanıtlanıyordu:
 
 - Onboarding nerede kopuyor — kayıt, workspace, board, ilk kart, ilk davet?
 - Davetler dönüşüyor mu; dönüşmüyorsa suç davet akışında mı, yoksa SMTP aktarımı olmayan bir
@@ -69,7 +69,7 @@ günde iki veya daha fazla _mevcut_ üyesi iz bırakmış workspace'ler. Yanınd
 birlikte döner (her boyuttan haftalık aktif workspace, ve genel olarak 2+ üyeli workspace
 sayısı), çünkü "3" dört takım workspace'i içinde mükemmel, dört yüz içinde krizdir.
 
-**Kimler okuyabilir: `INSTANCE_ADMIN_EMAILS`, varsayılan boş, yani hiç kimse.** Bu, kod
+**Kimler okuyabilir: `INSTANCE_ADMIN_EMAILS` (bu hesapların e-postaları doğrulanmışsa), varsayılan boş, yani hiç kimse.** Bu, kod
 tabanındaki workspace rolü olmayan tek yetkilendirme sınırıdır ve huni, kiracılar arası okuma
 yapması meşru olan ilk şey olduğu için vardır.
 
@@ -126,7 +126,8 @@ PR #188 hatasının tekrarıdır — bir payload, ya da bir sayfa, bir şeyi kim
 genişletmemelidir ve kurulum genelindeki sayılar hiçbir workspace üyesinin hakkı olmadı.
 Yapılandırma dürüst sınırdır: `DATABASE_URL`'i okuyabilen kişi, kurulum genelindeki sayıları
 görecek hesapları adlandırabilir. Varsayılan boş olması, taze bir kurulumun bunu kimseye —
-kendi sahibine bile — göstermemesi demektir; ta ki biri bilerek `.env`'e bir adres yazana kadar.
+kendi sahibine bile — göstermemesi demektir; ta ki biri bilerek `.env`'e bir adres yazana kadar; ayrıca
+erişim bu hesapların e-posta adreslerinin doğrulanmasını gerektirerek daha da sınırlanmıştır.
 
 **Telemetri neden kapalı ve neden kurulum kimliği taşımıyor?** Varsayılan kapalı bir nezaket
 değil; self-host yazılımın _amacıyla_ uyumlu tek varsayılandır. Bir anahtarı bulup kapatmak
@@ -167,7 +168,7 @@ gün tartışmanın çoktan bitmiş olması için ve kendi kurulumunun kalp atı
 isteyen operatörün desteklenen bir yolu olsun diye vardır.
 
 **Operatörün bunları görmek için yapması gereken.** `INSTANCE_ADMIN_EMAILS`'i kendi adresine
-ayarlamak ve ayarlar ekranını yenilemek. Hiçbir şey yapmamak huniyi hesaplanmış ama okunamaz,
+ayarlamak, o hesabın e-postasını doğrulamak ve ayarlar ekranını yenilemek. Hiçbir şey yapmamak huniyi hesaplanmış ama okunamaz,
 ping'i ise gönderilmemiş bırakır; ikisini de istememiş biri için doğru davranış budur.
 
 ## Değerlendirilen alternatifler

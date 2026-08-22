@@ -11,8 +11,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * email, both of which have to be in a specific person's language.
  *
  * `User.locale` is read from the database rather than from the session, on purpose. Better
- * Auth caches the session user in a signed cookie for five minutes (`session.cookieCache`), so
- * a locale carried on the session would keep reporting the old language for up to five minutes
+ * Auth caches the session user in a signed cookie for 60 seconds (`session.cookieCache`), so
+ * a locale carried on the session would keep reporting the old language for up to 60 seconds
  * after the user changed it — and `GET /me` is what the web's resolution chain consults, so
  * the interface would simply not change until the cache expired. A primary-key lookup is the
  * price of the preference being correct the moment it is saved.

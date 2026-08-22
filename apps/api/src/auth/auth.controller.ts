@@ -34,8 +34,9 @@ export class AuthController {
     summary: "Update the caller's own profile",
     description:
       'Not workspace-scoped and deliberately not role-gated: the subject is the caller, so the ' +
-      'session guard is the whole authorization story. Interface language is the only field ' +
-      'today, and `null` is a distinct state from `"en"` \u2014 it means "follow the browser".',
+      'session guard is the whole authorization story. Two fields: the interface language, ' +
+      'where `null` is a distinct state from `"en"` (it means "follow the browser"), and ' +
+      '`emailNotifications`, the per-user switch for notification email.',
   })
   @ApiOkResponse({ type: UserSchema })
   @Patch('me')

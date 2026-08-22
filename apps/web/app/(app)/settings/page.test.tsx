@@ -22,6 +22,10 @@ vi.mock('@/components/settings/language-settings', () => ({
   LanguageSettings: (): React.ReactElement => <div data-testid="language-settings" />,
 }));
 
+vi.mock('@/components/settings/notification-settings', () => ({
+  NotificationSettings: (): React.ReactElement => <div data-testid="notification-settings" />,
+}));
+
 vi.mock('@/components/settings/members-settings', () => ({
   MembersSettings: (): React.ReactElement => <div data-testid="members-settings" />,
 }));
@@ -66,11 +70,13 @@ describe('SettingsPage', () => {
     expect(headings).toEqual([
       messages.app.settings.members.title,
       messages.app.settings.language.title,
+      messages.app.settings.notifications.title,
       messages.app.settings.workspace.title,
       messages.app.settings.account.title,
     ]);
     expect(screen.getByText(messages.app.settings.members.description)).toBeTruthy();
     expect(screen.getByText(messages.app.settings.language.description)).toBeTruthy();
+    expect(screen.getByText(messages.app.settings.notifications.description)).toBeTruthy();
     expect(screen.getByText(messages.app.settings.workspace.description)).toBeTruthy();
     expect(screen.getByText(messages.app.settings.account.description)).toBeTruthy();
   });
@@ -80,6 +86,7 @@ describe('SettingsPage', () => {
 
     expect(screen.getByTestId('members-settings')).toBeTruthy();
     expect(screen.getByTestId('language-settings')).toBeTruthy();
+    expect(screen.getByTestId('notification-settings')).toBeTruthy();
     expect(screen.getByTestId('workspace-settings')).toBeTruthy();
     expect(screen.getByTestId('account-settings')).toBeTruthy();
   });
@@ -96,6 +103,8 @@ describe('SettingsPage', () => {
       messages.app.settings.members.description,
       messages.app.settings.language.title,
       messages.app.settings.language.description,
+      messages.app.settings.notifications.title,
+      messages.app.settings.notifications.description,
       messages.app.settings.workspace.title,
       messages.app.settings.workspace.description,
       messages.app.settings.account.title,

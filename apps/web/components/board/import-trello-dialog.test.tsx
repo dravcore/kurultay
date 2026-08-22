@@ -165,6 +165,20 @@ describe('ImportTrelloDialog', () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it('announces the rejected file to assistive tech and moves focus to it', async () => {
+    postForm.mockRejectedValue(
+      new ApiError({ statusCode: 400, error: 'Bad Request', message: 'not a Trello export' }),
+    );
+    renderDialog();
+    pick();
+
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(messages.app.board.import.badFile);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
   it('names the role problem rather than blaming the file when the API says 403', async () => {
     postForm.mockRejectedValue(
       new ApiError({ statusCode: 403, error: 'Forbidden', message: 'forbidden' }),

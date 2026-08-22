@@ -88,3 +88,21 @@ updates:
         update-types:
           - minor
           - patch
+
+  # `mailpit` in `docker-compose.dev.yml` is now pinned `tag@sha256:...` instead of `:latest`
+  # (roadmap Hardening: "mailpit pinned by digest"), which is what gives this ecosystem
+  # something to bump. `directory: /` also covers `docker-compose.yml` in the same directory:
+  # its `postgres`/`redis`/`caddy` tags may get bump PRs too, which is fine, and its
+  # `ghcr.io/dravcore/kurul-*` images resolve the `${TAG:-latest}` build arg through the
+  # release pipeline rather than a literal tag, so Dependabot has nothing to propose there.
+  #
+  # The e2e workflow's own `services: mailpit` image is a separate pin this ecosystem does not
+  # see at all — Dependabot's `docker` ecosystem only reads Dockerfiles and compose files, not
+  # a `uses:`-adjacent `services:` block in a workflow — so that one stays a manual bump; see
+  # the comment on it in `.github/workflows/e2e.yml`.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    # Same reasoning as the other two blocks: `main` takes only release/* and hotfix/* merges.
+    target-branch: develop

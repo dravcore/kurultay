@@ -86,6 +86,18 @@ describe('LoginView', () => {
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 
+  it('announces the refused sign-in to assistive tech and moves focus to it', async () => {
+    mocks.signInEmail.mockResolvedValue({ error: { message: 'Invalid credentials' } });
+    renderView();
+    fillCredentials();
+
+    submit();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Could not sign in. Check your email and password.');
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
   it('returns an invitee to the invitation they were sent to sign in from', async () => {
     mocks.searchParams = new URLSearchParams('next=%2Finvite%2Fabc');
     renderView();

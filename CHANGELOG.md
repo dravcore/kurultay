@@ -7,7 +7,500 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+## [0.3.0] - 2026-08-22
+
+_Finding IDs such as `SEC-02`, `OPS-04` and `OPS-05` are scoped to the audit wave that
+produced them: the same ID means different things in the 0.1.0 audit, the 0.2.0 audit and
+the 2026-08-18 "atlas" audit. See
+[ROADMAP.md](ROADMAP.md#deferred-with-triggers-from-the-2026-08-13-audit)._
+
+### Fixed
+
+- **The test suites no longer read `packages/*/dist`.** `@kurul/shared-types` and
+  `@kurul/auth-access` resolve through their `package.json` to a git-ignored build, so a fresh
+  checkout failed `pnpm test` with `Cannot find module '@kurul/shared-types'` (Jest) and
+  `Failed to resolve entry for package "@kurul/shared-types"` (Vitest), and a checkout with an
+  old build passed against last week's enums. Both Jest configs (`moduleNameMapper` plus a
+  matching `paths` entry for ts-jest, and a mapper that lets the packages' NodeNext `.js`
+  imports resolve to `.ts`) and both Vitest configs (`resolve.alias`) now point the two
+  specifiers at `src/index.ts`; `packages/auth-access`'s own suite, which imports
+  `@kurul/shared-types`, gets the same alias. A spec in each runner asserts the mapping holds,
+  and the CI test job no longer builds the packages, so it runs the way a fresh clone does.
+  The build is still needed for `pnpm typecheck`, `nest build`, `next build`, `pnpm dev` and
+  `pnpm db:seed`.
+
+- **The task search box treated `%` and `_` as SQL wildcards instead of the characters a user
+  typed.** `q` reached Postgres through Prisma's `contains`, which — confirmed empirically
+  against Postgres 18 — compiles to `ILIKE`/`LIKE` with the search string bound as a *pattern*,
+  not a literal: searching `50%` also matched `"50X done"`, and `a_b` also matched `"aXb"`. A
+  shared `escapeLikePattern` helper now escapes `%`, `_` and the backslash that escapes them
+  before the string reaches `contains`, so the search box matches only what it looks like it
+  matches. The same unescaped `contains` was also used to sweep a departing account's
+  `Verification` rows during account deletion — an email local-part is free to contain `_`, so
+  an erased `john_doe@example.com` could have deleted a stranger's live `johnXdoe@example.com`
+  verification token too; that call site is escaped the same way (audit follow-up to DB-01).
+
+- Dialog and auth submit errors are now announced to screen readers and receive focus (WCAG
+  4.1.3, audit finding UX-01). Login, register, confirm, form, delete-account,
+  delete-workspace and the Trello import dialog rendered their submit-level error as plain
+  text with no toast on this path, so assistive tech never heard it and sighted keyboard users
+  had no cue where it landed; the shared `SubmitError` component now marks it `role="alert"`
+  and moves focus to it on every mount, including a retry that fails with the exact same
+  wording.
+
+- **An attachment can no longer be stored half-file and half-link.** `AttachmentKind` was
+  introduced so that `storageKey`, `mimeType`, `size` and `url` would be nullable *because of*
+  `kind` rather than in general ([ADR 0024](docs/decisions/0024-attachment-kinds-and-serving-policy.md)),
+  and the schema comment promised that a row carrying both a URL and a storage key — or neither —
+  was unwritable. Nothing enforced it: the four columns were plainly nullable, and the promise
+  held only as long as every writer happened to be `AttachmentService`. The Trello importer is a
+  writer that is not — it bulk-inserts attachment rows with `createMany` — which is the exact
+  case the ADR predicted. A CHECK constraint, `Attachment_kind_fields_check`, now makes the two
+  shapes the only ones the table accepts (audit finding DB-02).
+
+  **The migration validates existing rows rather than grandfathering them**, so an instance that
+  somehow holds a half-written attachment fails the upgrade with the offending constraint named
+  instead of carrying the row forward under a constraint that only applies to future writes.
+  Every row the shipped code can have written satisfies the predicate, so no action is expected
+  on upgrade.
+
+- **The curl-based self-host install could never finish, and scheduled backups silently never
+  ran.** [self-hosting.md](docs/self-hosting.md) downloads only `docker-compose.yml`,
+  `docker/Caddyfile` and `.env.example` — no source tree — but the `migrate` service was
+  `build:`-only, so `docker compose up -d` had nothing to build it from and `api`
+  (`depends_on migrate: service_completed_successfully`) could never start: the guide's "no
+  build step" promise was unfulfillable on the path it documents. A third published image,
+  `ghcr.io/dravcore/kurul-migrate`, fixes that — built from `apps/api/Dockerfile`'s `migrate`
+  stage on `linux/amd64` + `linux/arm64`, following the same per-arch build, digest merge,
+  cosign signature and SBOM pattern already applied to `kurul-api` and `kurul-web`
+  ([release-images.yml](.github/workflows/release-images.yml)). `docker-compose.yml`'s
+  `migrate` service now carries `image: ghcr.io/dravcore/kurul-migrate:${TAG:-latest}`
+  alongside its existing `build:`, the same fallback pair `api`/`web` already had.
+
+  Independently, the same download step never fetched `scripts/backup.sh` either, which the
+  `backup` service bind-mounts — so on a fresh curl-based install, scheduled backups silently
+  never ran, with nothing in the logs to say why.
+  [self-hosting.md](docs/self-hosting.md) (+ [tr mirror](docs/tr/self-hosting.md)) now
+  downloads it alongside the compose file.
+
+  **`kurul-migrate` exists from the first release after v0.2.0 onward, not on v0.2.0 itself** —
+  the workflow that publishes it is new in this change. An operator following the curl-based
+  guide against a `v0.2.0` install still hits the original failure; `git clone` is the
+  documented workaround until the next tag ships, and the guide now says so up front instead
+  of leaving that to be discovered from a pull failure.
+
+  Audit finding OPS-01.
+- **The `backup` service now declares a healthcheck** (audit finding OPS-02). `scripts/backup.sh`'s
+  main loop runs `take_dump || true` / `take_files || true`, so a cycle that fails only logs and
+  keeps sleeping — the process never exits non-zero, and until now nothing about the container's
+  own state changed either, so a backup could silently stop being produced with `docker compose ps`
+  still reporting the service as simply "Up". RPO grew unbounded and invisibly, and the API's
+  retention sweep (`BACKUP_KEEP × BACKUP_INTERVAL` grace window, `cleanup.worker.ts`) silently
+  assumed dumps were actually landing.
+
+  Unhealthy now means: no `/backups/kurul-*.dump` modified in the last `2 × BACKUP_INTERVAL`
+  seconds (48h on the default 24h interval — 2× so one slow or skipped cycle doesn't flap the
+  status). The check reads `$BACKUP_INTERVAL` from the container's own environment, so it tracks
+  whatever an operator's `.env` sets rather than assuming the default. It uses `find -mmin`, not
+  GNU `find`'s `-newermt`: the image is `postgres:18-alpine`, whose `find` is BusyBox's and has
+  neither `-newermt` nor `-newermin` (confirmed with `docker run --rm postgres:18-alpine find
+  --help`). `start_period` (10 minutes) is sized to the first `pg_dump` completing, not to
+  `BACKUP_INTERVAL` — the first cycle starts at container boot, not after one interval elapses, so
+  tying it to a 24h default would hide a genuinely broken first cycle for most of a day.
+
+  `docs/self-hosting.md` (and its `docs/tr/` mirror) no longer says `backup` declares no
+  healthcheck, and now has a "watch backup freshness" bullet next to the existing
+  `/api/health/ready` monitoring guidance — that endpoint never touches the backup sidecar, so it
+  stays green through a backup outage. `scripts/bootstrap.mjs`'s comment on which dev-loop
+  containers declare healthchecks is updated to match (`docker-compose.dev.yml` has no `backup`
+  service of its own, so this doesn't change what that script waits on).
+
+### Added
+
+- **Email notifications** ([#255](https://github.com/dravcore/kurul/discussions/255)). An
+  assignment, a mention in a comment and a due-soon reminder now also arrive by email, in the
+  recipient's stored language (`User.locale`, falling back to English), with a link to the
+  card. One message per stored `Notification` row, sent after the transaction commits through
+  the transport the invitation email already uses; a failed send is logged and never fails the
+  request that caused it, and an instance without `SMTP_HOST` sends nothing and changes
+  nothing. The switch is `User.emailNotifications` (default `true`), one boolean for every kind,
+  read and written through `GET /me` / `PATCH /me` and shown as a checkbox under
+  Settings > Notifications in both languages. There is no digest: the existing per-comment and
+  per-24h dedupe in the notification paths is the only batching, and that is recorded as an
+  open question on the roadmap row rather than built. Covered by template, mailer and worker
+  unit tests, a settings component test, and an e2e scenario that captures the message for a
+  Turkish assignee and checks that nothing goes out after they opt out.
+
+- **`pnpm db:drift` checks the configured database against `schema.prisma` for migration
+  drift** (roadmap Hardening: "migration drift check"). It runs `prisma migrate diff
+  --from-config-datasource --to-schema apps/api/prisma/schema.prisma --exit-code`, printing
+  "No difference detected." and exiting `0` when they agree, or naming the mismatch and
+  exiting non-zero otherwise. CI's "Check for migration drift" step, which already ran this
+  command right after `db:migrate`, now calls `pnpm db:drift` instead of repeating the raw
+  invocation, so a local pass and a CI pass mean the same thing. No `kurul_shadow` database was
+  added: Prisma 7.9.1 has no CLI flag for a shadow database on this command, and setting
+  `datasource.shadowDatabaseUrl` in `prisma.config.ts` changes `migrate dev` behaviour too,
+  which this change did not need.
+
+- **A per-IP byte budget on the upload route** (audit finding SEC-02 follow-up,
+  [ADR 0027](docs/decisions/0027-attachment-quotas.md)'s 2026-08-21 update). The route's
+  request throttle counts requests, which `rate-limit.ts` has called the wrong unit for disk
+  since it shipped: twenty 25 MiB uploads and twenty 10 kB uploads spent the same allowance.
+  `ATTACHMENT_UPLOAD_BYTES_PER_MINUTE` (default `268435456`, 256 MiB a minute, about ten
+  max-size uploads; `0` switches it off, negative refuses to boot) is now charged per client IP
+  over a fixed minute by a guard that runs before multer touches the body, so a refused request
+  costs the API no heap. The charge is the request's `Content-Length`; a multipart request that
+  declares none is charged `ATTACHMENT_MAX_BYTES`, and a JSON body (a LINK, which stores
+  nothing) is not charged. Over budget answers `429` with `error: "Upload Budget Exceeded"`, a
+  new constant in `@kurul/shared-types` beside the quota's, plus `Retry-After`; the request
+  throttle's `429` keeps `"Too Many Requests"`, so a client can tell the two apart without
+  reading `message`. Counters live in Redis when `REDIS_URL` is set and degrade to a bounded
+  per-process counter on Redis errors, the same shape as the SEC-03 fix for the `/auth/*`
+  limiter rather than failing open. It honours `RATE_LIMIT_ENABLED` and `TRUST_PROXY` like
+  every other limit, and the upload route's OpenAPI `429` now describes both budgets.
+- **A harness for verifying the Trello importer against real exports, and the anonymiser that
+  makes committing one possible.** `scripts/anonymise-trello-export.mjs` (node built-ins only)
+  takes a board's JSON export and rewrites every piece of personal or proprietary text (board,
+  list, card, checklist and label names, descriptions, comments, member details, attachment names
+  and URLs, custom field names and values, e-mail addresses and URLs wherever they appear) into
+  deterministic, seeded pseudonyms of the same length and shape, while keeping the structure the
+  importer reads byte for byte: keys and their order, array lengths, nulls, booleans, numbers,
+  dates, colours, `closed` flags, and every id relationship (Trello ids are remapped consistently,
+  keeping their timestamp prefix and sort order). A URL that also looks like an e-mail address
+  (`mailto:`, userinfo, an `@` in the path) stays a URL with its scheme, a file extension is
+  kept only on an attachment's name and only from a known list, so a `first.last` handle or an
+  honorific never survives as a tail, and the output is written the way the input was formatted,
+  so Trello's minified export stays minified and the import size limit applies to both alike. It
+  prints a count summary and lists every top-level key and string-carrying key path it did not
+  recognise, in the spirit of ADR 0025.
+  `apps/api/test/fixtures/trello/real/` is where the output goes;
+  `apps/api/test/trello-import-real.e2e-spec.ts` imports every file found there through the real
+  endpoint and checks the report and the database against counts derived from the file, and while
+  the directory is empty it reports one visibly skipped test naming the open `v0.3.0` gate. A
+  guard that runs regardless proves the anonymised synthetic fixture imports identically to the
+  original. The anonymiser's unit tests run on `node:test` (`pnpm test:scripts`, also in CI). The
+  gate itself stays open until two anonymised real exports are in the directory and the
+  field-mapping diffs are recorded in the fixtures README.
+
+- **The `v0.3.0` Trello real-export gate closed.** Two anonymised real Trello exports —
+  Trello's own default "Starter Guide" board and an eleven-list board, both exported and
+  anonymised on 2026-08-22 — are now in `apps/api/test/fixtures/trello/real/`, and
+  `trello-import-real.e2e-spec.ts` imports both end to end with no reader-level field-mapping
+  diff against the synthetic fixtures: every field `trello-export.ts` reads matched the type
+  ADR 0025 already assumed, including a fractional `lists[].pos`, the `purple_light`
+  `_light` colour suffix alongside the already-covered `_dark`, and Trello's own empty-name
+  default labels. No importer change was needed. The findings are recorded in
+  `apps/api/test/fixtures/trello/README.md#field-mapping-diffs`.
+
+- **Attachment storage quotas — the total is finally bounded, not just each file** (audit
+  finding SEC-02, [ADR 0027](docs/decisions/0027-attachment-quotas.md)). Two new variables cap
+  the summed size of stored file attachments: `ATTACHMENT_WORKSPACE_QUOTA_BYTES` per workspace
+  and `ATTACHMENT_INSTANCE_QUOTA_BYTES` instance-wide. Until now the only ceilings were
+  per-file and per-minute, which the rate-limit code itself called the wrong unit: at the
+  defaults an authenticated client could spend ~500 MiB of disk a minute indefinitely, on a
+  volume the Compose stack shares with Postgres. Both quotas default to unset — unlimited,
+  exactly the pre-upgrade behaviour — and `0` means the same, matching the retention windows'
+  spelling. The quota counts live FILE rows only (link attachments store no bytes and never
+  count), is checked before anything touches the disk, and is deliberately soft: concurrent
+  uploads can each overshoot by at most one file. A rejected upload answers `413` with
+  `error: "Attachment Quota Exceeded"` in the envelope — distinguishable from the per-file
+  limit's `413` by that field, which is what the web now branches on to tell the user to free
+  up space rather than shrink the file.
+
+- **`pnpm bootstrap` — a fresh clone reaches a running dev loop in one command.**
+  [`scripts/bootstrap.mjs`](scripts/bootstrap.mjs) runs the five commands the dev loop already
+  documented, in the same order (shared-package build → `db:generate` → dev containers →
+  `db:migrate` → `db:seed`), and adds the two things a reader cannot add by replaying them:
+  a preflight that reads `.env` before anything is started, and a wait on the containers' own
+  healthchecks. It is the documented path rather than a second, faster one — if the script and
+  [development.md](docs/development.md) disagree, one of them is a bug.
+
+  The preflight exists because these failures otherwise arrive late and named after the wrong
+  thing: an empty `POSTGRES_PASSWORD`, an empty `BETTER_AUTH_SECRET`, or a `DATABASE_URL` still
+  carrying the `<POSTGRES_PASSWORD>` placeholder from `.env.example` each surface only once
+  something tries to connect, with an error that mentions neither `.env` nor the variable.
+
+  **Re-running it is safe, and that is a constraint rather than a convenience.** `pnpm db:seed`
+  deletes before it inserts, so a script anybody is told to run after a `git pull` must not be
+  one that quietly wipes the board they were working on: seeding happens only when the database
+  holds no `Workspace` row, `--seed` forces it anyway, `--no-seed` skips it, and a database it
+  cannot read is treated as "do not seed" rather than as consent. The script is named
+  `bootstrap` and not `setup` because `pnpm setup` is a built-in pnpm command that writes to
+  your shell profile.
+
+- **A Community section in both READMEs, and GitHub Discussions declared the official channel.**
+  Q&A for setup and usage, Ideas for roadmap feedback, Show and tell for what you built; bugs
+  stay [issues](https://github.com/dravcore/kurul/issues) and vulnerabilities stay
+  [SECURITY.md](SECURITY.md). The section also states, up front rather than as a discovery,
+  how a contribution is accepted: code, documentation and translations are all welcome under
+  plain AGPL-3.0 with nothing to sign
+  ([ADR 0028](docs/decisions/0028-open-contributions-hosted-service.md)), because a project
+  that asks for feedback owes people the shape of the door before they walk through it.
+
+- **Every Beyond-MVP row now links to a discussion that can be upvoted**
+  ([ROADMAP.md](ROADMAP.md#beyond-mvp), thirteen rows). Votes do not order the list — an
+  unscheduled row stays unscheduled — but a row with people behind it and a concrete use case
+  attached is the only thing that moves one off it, and there was previously nowhere for that
+  to accumulate.
+
+- **`INVITATION_RETENTION_DAYS` (default `90`) — the nightly sweep now covers a sixth table,
+  `WorkspaceInvitation`.** It is the one address in the schema that need not belong to a user of
+  the instance: invite somebody who never signs up and there is no account for any deletion path
+  to reach, so before this the row kept a third party's e-mail address for the life of the
+  install. A row is deleted once it is **finished** — answered (accepted, rejected, canceled) or
+  past `expiresAt` — **and** older than the window; a `pending`, unexpired invitation is exempt
+  at any age, because it is a live grant of access somebody can still accept. `0` keeps them
+  forever, like the other windows.
+
+  The window is measured from `createdAt`, the only timestamp the table has, which deletes the
+  record slightly earlier than measuring from the answer would — bounded by how long a row can
+  stay pending. Ninety days rather than `ACTIVITY_RETENTION_DAYS`' year because nobody browses a
+  finished invitation (the settings screen lists `pending` rows only), so keeping it longer only
+  stores an address. Its own variable rather than a share of `NOTIFICATION_RETENTION_DAYS`
+  because shortening one is a decision about other people's data and shortening the other is
+  tidying an inbox. Operators who need the old behaviour set `INVITATION_RETENTION_DAYS=0`
+  before upgrading — the first nightly run after the upgrade deletes the accumulated backlog.
+
+### Changed
+
+- **Attachment quotas have finite defaults: an instance nobody configured is capped at 2 GiB
+  per workspace and 20 GiB in total** (audit finding SEC-02,
+  [ADR 0027](docs/decisions/0027-attachment-quotas.md), updated 2026-08-21). The quota engine
+  shipped with "unset means unlimited", which left the audit's finding, unbounded disk
+  consumption on a volume the Compose stack shares with Postgres, open for exactly the operator
+  who never reads the quota section. Unset `ATTACHMENT_WORKSPACE_QUOTA_BYTES` now means
+  `2147483648` and unset `ATTACHMENT_INSTANCE_QUOTA_BYTES` means `21474836480`; a written `0`
+  is still the opt-out and a negative value is still refused at boot. The API logs the effective
+  ceilings at start, marking each as `(default)` or `(env)`, and warns, rather than refusing,
+  when the workspace quota is set above the instance quota or the upload byte budget is smaller
+  than one max-size file. The 413 with `error: "Attachment Quota Exceeded"` is now proven by an
+  integration test with the variables genuinely unset, against a real Postgres sum.
+
+  **Upgrade note:** a workspace already holding more than 2 GiB of files, or an instance
+  holding more than 20 GiB, gets a `413` on its next upload unless a higher number (or `0`) is
+  set first. `docs/self-hosting.md` carries the one-line `SUM(size)` queries to check before
+  upgrading. `.env.example` and `docker-compose.yml` ship the new numbers written in.
+
+- **The Quick start in both READMEs is split into "Run it" and "Develop it".** The pull-based
+  Docker path — the one for people who want to run Kurul rather than work on it — was
+  previously the fourth paragraph of a section that opened with a toolchain. Developing it now
+  also carries the prerequisite versions (Node ≥ 24, pnpm 9+, Compose v2, Git 2.30+), which
+  the README had never stated at all, and spells out what skipping the shared-package build or
+  `db:generate` actually looks like, since both fail as though the checkout were broken.
+
+  One correction came out of the split: the instruction to match `DATABASE_URL`'s password
+  segment to `POSTGRES_PASSWORD` was written as though it applied to every install. It applies
+  to the dev loop only — `docker-compose.yml` assembles its own connection string from
+  `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` and never reads that line.
+
+- **Deleting an account now also deletes every invitation addressed to it, in any state.**
+  `DELETE /me` and `DELETE /instance/users/:userId` anonymise the `User` row and used to remove
+  only the invitations that account had *sent* and left pending. `WorkspaceInvitation.email` is a
+  literal address in a column of its own — nothing about it is derived from `User` — so rewriting
+  the row to `deleted-<id>@deleted.invalid` left every invitation ever sent *to* that person
+  still spelling out where they can be reached, and an erasure request that leaves the address in
+  the database has not erased it (audit finding DB-01).
+
+  Accepted and rejected rows go too, unlike on the inviter side: an invitation addressed to the
+  departing user is not somebody else's record of an event, it is a copy of that user's own
+  contact details. What the workspace keeps is the membership history itself, in
+  `WorkspaceMember` and `Activity`, which never carried the address. **For an operator this
+  narrows what a dump can restore**: the erasure-recovery runbook in
+  [development.md](docs/development.md#undoing-an-account-deletion) now lists invitee-side
+  invitation rows as recoverable only from a dump that predates the deletion.
+
+- **Outside contributions are accepted again, under plain AGPL-3.0 and with nothing to
+  sign.** Code, documentation and translations are all welcome; the terms are inbound =
+  outbound, so a contribution is licensed under the project's own AGPL-3.0 and its author
+  keeps their copyright. There is no CLA, and no DCO for now
+  ([ADR 0028](docs/decisions/0028-open-contributions-hosted-service.md), which supersedes
+  [ADR 0014](docs/decisions/0014-dual-licensing-cla.md) and
+  [ADR 0015](docs/decisions/0015-no-external-contributions.md) in full). What does not
+  change: an issue first for anything non-trivial, the ~500-line pull request guideline, and
+  review on every PR. CONTRIBUTING.md, the pull request template and both READMEs are
+  rewritten around that.
+
+- **Revenue comes from an optional hosted service instead of a commercial license.**
+  Dravcore runs an instance anybody can have an account on, free within a published set of
+  limits (seats, boards, storage and similar operational quantities) and paid above them.
+  Self-hosting stays free forever with nothing held back: no open core, no paid edition, and
+  no feature that exists only on our servers. The hosted service runs the same AGPL-3.0 code
+  as this repository, the plan-limit and billing code included, which a self-hoster
+  configures to taste or leaves switched off
+  ([ADR 0028](docs/decisions/0028-open-contributions-hosted-service.md)).
+
+- **The CLA draft moved to `docs/archive/cla-draft.md`** (and was deleted with the whole archive a day later, see Removed), its
+  not-in-force banner intact. An agreement that was never enacted, and that nobody will now
+  be asked to sign, is a historical record rather than a policy.
+
+### Removed
+
+- **The `CLA` workflow.** `.github/workflows/cla.yml` had been disabled since
+  [ADR 0015](docs/decisions/0015-no-external-contributions.md) (manual trigger only, plus an
+  `if: false` job guard); with no agreement for anybody to sign, there is nothing left for it
+  to check, so it is deleted. Its last version stays in git history, which is where a DCO
+  check would start from if contribution volume ever justifies one.
+
+- **The commercial-license line and the `licensing@dravcore.com` address, from both
+  READMEs.** Neither ever reached a release, but this section advertised them until today,
+  so the removal is recorded here rather than left as a silent edit.
+
+- **`docs/archive/` in full:** the Phase 0-9 checklists (`roadmap-mvp-phases.md`), the Phase 1
+  scaffold how-to (`project-skeleton.md`), the shipped phase and visual-debt design specs, the
+  finished implementation plans, and the never-enacted CLA draft that had been moved there a day
+  earlier. A finished plan has nothing left to say that `ROADMAP.md`, an ADR or the code does not
+  say better, and a second tree of historical markdown was a place for stale links to collect.
+  Git history keeps every file; `CLAUDE.md`'s docs policy now says delete rather than archive.
+  Links from `docs/`, both READMEs and the ADRs that pointed into the archive are rewritten or
+  turned into plain text; the released entries below keep their old paths as text only.
+
+### Security
+
+- **Every pull request now builds the images this project ships and scans them for CVEs.**
+  `.github/workflows/ci.yml` gains an `image-scan` job: three parallel legs build `kurul-api`
+  at its `runner` and `migrate` targets and `kurul-web` (`push: false`, `load: true`, buildx
+  with a `type=gha` layer cache scoped per image), then run Trivy over each. A HIGH or CRITICAL
+  finding **that has a fix available** fails the leg and, through the `ci-ok` gate, the pull
+  request. Until now the only workflow that ever built a Dockerfile was `release-images.yml`,
+  which runs on a tag push, so a broken image or a vulnerable base was discovered by the
+  workflow whose job is to publish it.
+
+  The job hangs off nothing (`needs:` is absent) and runs beside `lint` and `test` rather than
+  after `build`: the PR pipeline on `develop` measures 4m56s-5m18s against the five-minute
+  trigger `ROADMAP.md` records for OPS-10, so this had to cost runner minutes and not wall
+  time. Unfixed advisories are ignored (`ignore-unfixed: true`) because a base-image CVE with
+  no fixed version fails every pull request for something no pull request can act on, and a
+  check that is always red is a check nobody reads.
+
+- **Removed the npm and yarn CLIs from all three runtime images.** Nothing in them ever ran
+  either: every `CMD` is `node`, over dependencies that were resolved at build time. Beyond the
+  ordinary case for not shipping a tool that fetches and executes code into a production
+  container, this is what the first run of the scan above turned up: npm's own bundled
+  dependencies (`tar`, `brace-expansion`, `ip-address`, `undici`) held **all eight** fixable
+  HIGH/CRITICAL findings across the three images, and none of them is closable from this
+  repository: they are fixed when the Node project cuts a `node:24-alpine` with a newer bundled
+  npm. All three images now scan clean at HIGH/CRITICAL. `corepack` stays, as the shim the
+  build stages go through. This does not change image size, since the files come from the base
+  image's own layer.
+
+- **`mailpit` is pinned by digest instead of `:latest`, in both `docker-compose.dev.yml` and
+  the e2e workflow's `mailpit` service** — `axllent/mailpit:v1.31.0@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24`
+  (roadmap Hardening: "mailpit pinned by digest"). A floating `:latest` on an image used in CI
+  and the local dev loop is the same class of finding as the workflow-action SHA pinning done
+  earlier (SEC-06) applied to a service that had not yet been covered. `.github/dependabot.yml`
+  gets a new `docker` ecosystem tracking the `docker-compose.dev.yml` pin (it also covers
+  `docker-compose.yml`, which shares the same directory); the e2e workflow's own `services:`
+  image sits outside what that ecosystem reads, so it stays a manual bump, with a comment at
+  the call site saying so. PR-time image build + Trivy scan for `api`/`web` is a separate,
+  still-open part of the same roadmap row.
+
+- **Pinned `deepmerge-ts` to `^8.0.1` through a pnpm override**, closing
+  [GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx) (high: stack
+  exhaustion when merging recursive object graphs). It reaches this repository through exactly
+  one root — `prisma > @prisma/config > deepmerge-ts@7.1.5`, fifteen paths, all of them that
+  chain — and `pnpm audit --audit-level high` began failing on it on 2026-08-17, on a lockfile
+  nothing had changed.
+
+  An override rather than an upgrade because there is nothing to upgrade to: `prisma` and
+  `@prisma/config` are at 7.9.1, the current release, and `@prisma/config` depends on
+  `deepmerge-ts` at an **exact** `7.1.5` rather than a range, so no dependency bump reaches it.
+  That also makes this override a **major** bump (7 → 8) on a version a vendor pinned
+  deliberately, which is worth stating plainly rather than burying: the reason it is acceptable
+  here is that it was verified rather than assumed, not that a major bump is ordinarily safe.
+
+  Verified after the override: `prisma generate` loads `prisma.config.ts` and generates the
+  client (that config load is the code path that reaches `deepmerge-ts` at all), and the full
+  suite is green — 1314 API, 770 web, 44 `shared-types`, 6 `auth-access` — alongside `lint`,
+  `typecheck`, `format:check`, `build` and `openapi:check`.
+
+  Worth keeping in proportion: nothing here was exploitable in a running instance. This
+  dependency is reached only while a Prisma CLI command merges configuration files, at build
+  and migration time, and never touches request-borne input — the thing that was broken was a
+  CI gate, not a deployment. The override should be dropped once Prisma ships a release that
+  depends on `deepmerge-ts >= 8`.
+
+- **`docker-compose.dev.yml` and `docker-compose.yml` shared the same implicit Compose project name** — the checkout's directory, usually `kurul`, since neither file declared its own
+  — and therefore the same container and volume names for every service both define:
+  `postgres`, `redis`, `postgres_data`, `redis_data`. Two failure modes came from that:
+  `docker compose -f docker-compose.dev.yml down -v` (the documented way to reset a local
+  database, docs/development.md#database-workflow) dropped the full stack's Postgres/Redis
+  volumes too if the full stack had ever been started from the same directory, and bringing the
+  full stack up afterward silently recreated the dev loop's `postgres` container from
+  `docker-compose.yml`'s definition, which publishes no host port — `localhost:5432` simply
+  stopped answering, with nothing anywhere naming why (OPS-04, 2026-08-18 audit).
+  `docker-compose.dev.yml` now declares its own project (`name: kurul-dev`), so its containers
+  and volumes (`kurul-dev_postgres_data`, …) are namespaced apart from the full stack's `kurul_*`
+  ones and the two can run side by side with neither able to touch the other's data. Existing
+  dev-loop containers/volumes under the old shared name are simply orphaned by this, not
+  migrated — the dev database has always been throwaway by design; recreate with
+  `pnpm bootstrap`. `scripts/bootstrap.mjs` needed no change: it already invokes compose with
+  only `-f`, never `-p`, so it picks up the new project name automatically.
+
+- **Every service in `docker-compose.yml` now carries a `mem_limit`** (`postgres`/`api`/`web`/
+  `migrate` 512m, `backup` 256m, `redis`/`proxy` 128m) — `docs/self-hosting.md` has promised "2
+  CPUs and 2 GB of RAM" is enough for a small team since it was written, but nothing enforced a
+  ceiling on any one container, so the *kernel* OOM killer picked whichever process it scored
+  worst when a host approached that budget, which is not necessarily the one that actually grew
+  (OPS-05, 2026-08-18 audit). `api` and `web` also set `NODE_OPTIONS=--max-old-space-size=384`
+  (75% of their 512m ceiling), pinning V8's heap explicitly rather than leaving it to Node's own
+  container-memory heuristic — both buffer request data into that heap up to
+  `REQUEST_BODY_MAX_BYTES`/`ATTACHMENT_MAX_BYTES` (`.env.example`) per concurrent request, which
+  is the likeliest source of unbounded growth in this stack. See
+  [self-hosting.md#server-sizing](docs/self-hosting.md#server-sizing) for the full per-service
+  table and how the ceilings add up against the 2 GB budget. Not verified by a live run under
+  the new limits — the sizing is derived from the request/attachment ceilings already documented
+  in `.env.example`, not measured under load.
+
+- **`session.cookieCache.maxAge` (`api/src/auth/auth.ts`) dropped from 5 minutes to 60
+  seconds**, shrinking the window in which a browser can keep presenting a session Better Auth
+  has already stopped considering valid in the database. That window is what lets a revoked
+  session outlive the action that revoked it: a password change, an instance administrator
+  force-deleting an account, or `Session` rows cleared to recover from a leaked `session_data`
+  cookie all stayed live for up to five minutes before this change (SEC-01, 2026-08-18 audit).
+  The cache itself stays on — it still saves the database read `session.cookieCache` was added
+  for on every authenticated request — just for a fifth as long: at self-host scale, one DB read
+  per user per minute is noise, while a 5× smaller revocation window matters on every one of
+  those flows. Not exposed as an env knob on purpose; the repo already resists knob
+  proliferation and nobody has asked to tune this — the trigger for adding one would be a
+  deployment where the per-minute read itself measurably hurts, not a guess that one might
+  exist. Every doc, comment and test that quoted the old five-minute figure — `docs/architecture.md`
+  §9.2 and its `docs/tr/` mirror, ADR 0018, ADR 0022, and a one-line dated update note on
+  [ADR 0026](docs/decisions/0026-account-deletion-anonymisation.md) (and their `docs/tr/`
+  mirrors), plus the API/e2e/web comments and tests that referenced it — is updated to 60
+  seconds alongside the code; ADR 0026's own historical narrative is left as written.
+
+- **The `/auth/*` rate limiter degrades instead of failing open when Redis errors mid-request**
+  (audit finding SEC-03). `createRedisRateLimitStorage`'s `consume()` previously answered every
+  request `{ allowed: true }` on any Redis error — the comment justified it as "a Redis blip must
+  not turn into nobody can sign in," but the same catch caught an outage of any length, and
+  Better Auth's built-in `/sign-in*`/`/sign-up*` rule (3 per 10s) backs onto exactly this storage.
+  A credential-stuffing run during a Redis outage ran completely unthrottled, at the moment an
+  operator is least likely to be watching.
+
+  Each API process now keeps a bounded, in-process fixed-window counter — mirroring the same
+  window/limit the Lua script enforces against Redis, `rule.max === 0` included — and consults it
+  only while Redis is erroring; a successful call goes back to Redis, but the fallback counters
+  are kept rather than cleared (see below). This is a per-process floor, not the shared limit: N
+  replicas each enforce the rule independently during an outage, so the effective ceiling across a
+  fleet of N is the rule's limit times N rather than the rule's limit — a bounded number in place
+  of the previous unbounded one, and documented as such rather than presented as equivalent to the
+  Redis-backed limit. The fallback's own memory is capped at 10,000 distinct keys, and it prunes
+  lazily rather than running a timer.
+
+  The transition into and out of degraded mode is logged at error level and reported once to
+  Sentry on the way down (when `SENTRY_DSN` is set), at most once per five minutes regardless of
+  how many times Redis flaps between erroring and answering in between — an intermittently
+  failing Redis previously logged and captured on every single flip. The fallback counters
+  themselves now survive a brief recovery instead of being cleared on every flap: clearing them
+  handed a flapping connection's attacker a clean slate each time it briefly recovered, which
+  defeated the floor this fallback exists for.
+
+  Eviction at the 10,000-key cap now prefers an already-expired entry over the oldest-inserted
+  one, and a key's window refresh re-inserts it rather than overwriting it in place — `Map#set` on
+  an existing key does not move it to the insertion-order tail, so without this a key hit
+  repeatedly (a currently-blocked attacker, worst case) could look like the *oldest* entry in the
+  map and be evicted ahead of keys nobody had touched in a while, handing that attacker a fresh
+  window under a high-cardinality flood.
 
 ## [0.2.0] - 2026-08-16
 
@@ -82,7 +575,7 @@ Nothing yet.
   in this API that is not JSON, with the five headers it writes. `/auth/*` and the Socket.io
   contract are absent and say so — neither is a Nest route.
 
-  `docs/roadmap.md` gains an **API 1.0** heading declaring the scope a compatibility promise
+  `ROADMAP.md` gains an **API 1.0** heading declaring the scope a compatibility promise
   would cover: a `/v1` prefix, personal access tokens, and three webhook events
   (`task.created`, `task.moved`, `task.completed`). All three are explicitly post-1.0 and none
   is implemented here.
@@ -828,7 +1321,7 @@ Nothing yet.
 - Docs consistency pass: Node ≥24, i18n status, squash policy, archive links,
   project-skeleton archived, TR design status synced.
 - Documentation map sharpened for post-MVP: `docs/README.md` is a five-minute reading guide;
-  `docs/roadmap.md` is status + Beyond MVP only; Phase 0–9 checklists moved to
+  `ROADMAP.md` is status + Beyond MVP only; Phase 0–9 checklists moved to
   `docs/archive/roadmap-mvp-phases.md`; shipped phase design specs moved to
   `docs/archive/specs/` (CHANGELOG links updated).
 
@@ -1168,49 +1661,49 @@ commit; this is the point it becomes a version.
   applies to columns still called Done.
 - Contributor License Agreement scaffolding for the dual-licensing model
   ([ADR 0014](docs/decisions/0014-dual-licensing-cla.md)): Harmony-derived CLA draft
-  ([docs/cla.md](docs/cla.md), EN/TR) — **not in force, pending legal review** — plus a
+  (`docs/cla.md`, EN/TR; deleted 2026-08-22 with `docs/archive/`) — **not in force, pending legal review** — plus a
   merge-blocking `CLA` workflow, a CONTRIBUTING section, and a PR-template checkbox.
 - `GET /workspaces/:workspaceId/members/me` returns the caller's own membership, so the app
   shell resolves the active role from one indexed row instead of `/me` plus the full roster.
 - Phase 9 realtime board sync
-  ([spec](docs/archive/specs/2026-08-09-phase-9-realtime-design.md)): Socket.io gateway with Redis
+  (spec, `docs/archive/specs/2026-08-09-phase-9-realtime-design.md`): Socket.io gateway with Redis
   adapter, session-cookie auth, `board:{id}` rooms, thin ID event contract (`actorId`),
   emit-after-commit from task/column/comment mutations, web `useBoardSocket` with reconnect
   resync and mid-drag cancel. Presence remains out of MVP; notification unread push shipped separately, above.
 - Deferred follow-ups: `/notifications` page (unread + type filters, cursor Load more,
   View all from the bell) and dashboard created-vs-completed throughput (14 UTC days;
   `task.moved` payloads include column names). See
-  [deferred notes](docs/archive/specs/2026-08-09-phase-8-deferred.md) (archived; open items
-  moved to [roadmap.md](docs/roadmap.md#beyond-mvp)).
+  deferred notes, `docs/archive/specs/2026-08-09-phase-8-deferred.md` (archived; open items
+  moved to [roadmap.md](ROADMAP.md#beyond-mvp)).
 - Phase 8 activity log and notifications
-  ([spec](docs/archive/specs/2026-08-09-phase-8-activity-notifications-design.md)): activity writes
+  (spec, `docs/archive/specs/2026-08-09-phase-8-activity-notifications-design.md`): activity writes
   on task create/update/move/delete/assign/comment; workspace and task feeds; `Notification`
   model (assignment, mention, due-soon via BullMQ); shell bell + task History; comment
   `@[Name](userId)` mentions. Email deferred
-  ([notes](docs/archive/specs/2026-08-09-phase-8-deferred.md), archived).
+  (notes, `docs/archive/specs/2026-08-09-phase-8-deferred.md`, archived).
 - Phase 7 dashboard
-  ([spec](docs/archive/specs/2026-08-09-phase-7-dashboard-design.md)):
+  (spec, `docs/archive/specs/2026-08-09-phase-7-dashboard-design.md`):
   `GET .../dashboard/summary?boardId?` with total/overdue tiles, priority and assignee
   charts, optional per-board column chart (Recharts), empty/loading states; completion
   over time now on `throughput` (Activity-backed).
 - Phase 6 filtering and search
-  ([spec](docs/archive/specs/2026-08-09-phase-6-filtering-design.md)): whitelisted `TaskQueryDto`
+  (spec, `docs/archive/specs/2026-08-09-phase-6-filtering-design.md`): whitelisted `TaskQueryDto`
   on `GET .../boards/:boardId/tasks` (`q`, priority, assignee, label, due-date null/range,
   sort), cursor pagination (`CursorPage<TaskDto>`), filter indexes, and a URL-synced board
   filter bar with chips, `/` search focus, and empty state.
 - Phase 5 task metadata
-  ([spec](docs/archive/specs/2026-08-09-phase-5-task-metadata-design.md)): board label CRUD with
+  (spec, `docs/archive/specs/2026-08-09-phase-5-task-metadata-design.md`): board label CRUD with
   `LabelColorSlot` colors, task assignees/labels, priority/`dueDate`/`estimatedMinutes`
   on `PATCH` tasks, comments, [ADR 0011](docs/decisions/0011-label-task-metadata-permissions.md),
   enriched `TaskDto`/`CommentDto`/`WorkspaceMemberDto`, and panel/card UI for metadata.
 - Phase 4 tasks and drag-and-drop
-  ([spec](docs/archive/specs/2026-08-09-phase-4-tasks-design.md)): workspace-scoped task CRUD,
+  (spec, `docs/archive/specs/2026-08-09-phase-4-tasks-design.md`): workspace-scoped task CRUD,
   fractional `Task.position` moves with on-demand rebalance,
   [ADR 0010](docs/decisions/0010-task-permissions.md) (MEMBER+ mutate), `@dnd-kit`
   multi-column board with optimistic move + toast rollback, and a title/description
   detail panel at `/board/[boardId]/task/[taskId]`.
 - Visual debt closure and Phase 4 groundwork
-  ([spec](docs/archive/specs/2026-08-09-visual-debt-design.md)): design.md type-scale tokens,
+  (spec, `docs/archive/specs/2026-08-09-visual-debt-design.md`): design.md type-scale tokens,
   reduced-motion policy that keeps color/opacity, shared `DamgaMark`, token-themed sonner
   toasts with retry actions, elevation tokens, shared 48px topbar, workspace switcher
   dropdown (usable from the collapsed rail), sliding sancak rail, shell loading skeleton,
@@ -1271,7 +1764,7 @@ commit; this is the point it becomes a version.
   rule by [ADR 0012](docs/decisions/0012-comment-delete-authorship.md) (author OR OWNER/ADMIN,
   not any MEMBER); `docs/archive/specs/2026-08-09-phase-8-deferred.md` archived to
   `docs/archive/specs/` with its remaining open follow-ups folded into
-  [roadmap Beyond MVP](docs/roadmap.md#beyond-mvp); api-conventions, tech-stack, testing, and
+  [roadmap Beyond MVP](ROADMAP.md#beyond-mvp); api-conventions, tech-stack, testing, and
   architecture docs refreshed to match the shipped activity/dashboard/notification routes, ADRs
   0009–0012, web Vitest in CI, next-intl, and the develop merge-commit practice actually in use.
 - Tooling: type-aware ESLint (floating-promise, React hooks rules), Husky pre-commit, Dependabot,
@@ -1358,6 +1851,7 @@ commit; this is the point it becomes a version.
   session cookie cache, batch due-soon scans and rebalance SQL, paginate comments, and add
   `pg_trgm` search indexes.
 
-[unreleased]: https://github.com/dravcore/kurul/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/dravcore/kurul/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/dravcore/kurul/releases/tag/v0.3.0
 [0.2.0]: https://github.com/dravcore/kurul/releases/tag/v0.2.0
 [0.1.0]: https://github.com/dravcore/kurul/releases/tag/v0.1.0

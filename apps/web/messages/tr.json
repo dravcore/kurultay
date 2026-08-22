@@ -136,6 +136,16 @@
         "saveError": "Diliniz kaydedilemedi.",
         "saveErrorSignedOut": "Oturumunuz sona erdi. Bunu kaydetmek için giriş yapın."
       },
+      "notifications": {
+        "title": "Bildirimler",
+        "description": "Gelen kutunuza neyin ulaşacağı. Kurul içindeki bildirimler bundan etkilenmez.",
+        "emailLabel": "Bir karta atandığımda, bir yorumda benden bahsedildiğinde ya da bir kartımın süresi yaklaştığında bana e-posta gönder",
+        "help": "Yalnızca e-posta gönderebilen bir sunucuda geçerlidir. Her bildirim ayrı bir e-postadır; günlük özet henüz yok.",
+        "saved": "Bildirim ayarları güncellendi",
+        "loadError": "Bildirim ayarlarınız yüklenemedi.",
+        "saveError": "Bildirim ayarlarınız kaydedilemedi.",
+        "saveErrorSignedOut": "Oturumunuz sona erdi. Bunu kaydetmek için giriş yapın."
+      },
       "members": {
         "title": "Üyeler",
         "description": "Bu workspace'i kimler açabilir ve içeri girdiklerinde ne yapabilirler.",
@@ -314,6 +324,7 @@
       "listSubtitle": "İşi bölüştürmek için bir board açın.",
       "listError": "Board'larınız yüklenemedi.",
       "loadError": "Board yüklenemedi.",
+      "unavailable": "Bu board yok ya da erişim yetkiniz yok.",
       "loadingMore": "Task'ların geri kalanı yükleniyor…",
       "backToBoards": "Board'lara dön",
       "emptyTitle": "Henüz board yok",
@@ -520,6 +531,7 @@
           "count": "{count, plural, other {# ek}}",
           "storageOff": "Bu instance dosya saklamıyor. Yine de bağlantı ekleyebilirsiniz.",
           "tooLarge": "Bu dosya, bu instance'ın kabul ettiğinden büyük.",
+          "quotaExceeded": "Bu dosya için yeterli ek depolama alanı kalmadı.",
           "wrongType": "Bu dosya türü kabul edilmiyor.",
           "saveError": "Bu eklenemedi.",
           "forbidden": "Bu task'ı değiştirme erişiminiz yok. Bir workspace yöneticisinden isteyin."

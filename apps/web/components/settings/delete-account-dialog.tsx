@@ -11,6 +11,7 @@ import type {
 import { api, resolveApiMessage } from '@/lib/api';
 import { useApiResource } from '@/lib/use-api-resource';
 import { disconnectSocket } from '@/lib/socket';
+import { SubmitError } from '@/components/common/submit-error';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -226,7 +227,7 @@ export function DeleteAccountDialog({
           </div>
         ) : null}
 
-        {error ? <p className="text-body text-destructive">{error}</p> : null}
+        {error ? <SubmitError message={error} /> : null}
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

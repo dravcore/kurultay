@@ -3,14 +3,24 @@
 Kurul'u bir sunucuya, kendi domain'inize, HTTPS ve çalışan e-posta ile kurun. Aşağıdakilerin
 tamamı bilinçli olarak tek sayfa; çoğu DNS beklemekle geçen yaklaşık bir saat ayırın.
 
+> 🌐 [English (canonical)](../self-hosting.md) | Türkçe — Bu çeviri güncel olmayabilir; kanonik kaynak İngilizce'dir.
+
 Build adımı yok. `docker compose pull` her sürüm için yayınlanan imajları indirir ve aynı imaj
 her domain'de çalışır — API URL'i imajın içine derlenmiş değildir (gerekçesi için bkz.
 [Neden yeniden build gerekmiyor](#neden-yeniden-build-gerekmiyor)).
 
+> **v0.2.0 mu kuruyorsunuz? Bunun yerine `git clone` kullanın.** v0.2.0 ve öncesi sürümler
+> yalnızca `api` ve `web` imajlarını yayınladı; bu sayfanın çektiği üçüncü imaj olan
+> `kurul-migrate`, v0.2.0'dan sonraki ilk sürümden itibaren var. Aşağıdaki indirme adımı build
+> edilecek bir kaynak ağacı getirmediği için v0.2.0'da bu sayfadaki adımlar stack'i
+> başlatamaz — [Sorun giderme](#sorun-giderme) bölümünde gösterildiği gibi clone'dan kurun ve
+> bir sonraki sürümden itibaren bu sayfaya dönün.
+
 ## Gerekenler
 
 - Public IP'si olan, Docker Engine 24+ ve Compose eklentisi kurulu bir sunucu. Küçük bir ekip
-  için iki CPU ve 2 GB RAM yeterli.
+  için iki CPU ve 2 GB RAM yeterli — bu 2 GB'ın nasıl harcandığı için bkz.
+  [Sunucu boyutlandırma](#sunucu-boyutlandırma).
 - Kontrolünüzdeki bir domain ve o sunucuya **açık 80 ve 443 portları**. İkisi de zorunlu:
   Let's Encrypt doğrulamayı 80 üzerinden yapar, tarayıcılar 443'ü kullanır.
 - Bir SMTP hesabı. Kurul'da davetlerin kabul edilebilmesi için giden e-posta şart —
@@ -29,6 +39,53 @@ her domain'de çalışır — API URL'i imajın içine derlenmiş değildir (ger
   Postgres'e "geçici olarak" ulaşmak için bir `docker-compose.override.yml`'de — `ufw deny 5432`
   yazılı olsa bile internete açıktır. Firewall, Docker'ın yönetmediği şeyleri korur; geri kalanı
   koruyan şey `ports:` listesidir — bu stack'in o listeyi tek servise indirmesinin nedeni budur.
+
+## Sunucu boyutlandırma
+
+`docker-compose.yml`'deki her servis artık bir `mem_limit` taşıyor (OPS-05, 2026-08-18 audit).
+Bundan önce hiçbir şey bir container'ın alabileceği belleği sınırlamıyordu, dolayısıyla 2 GB
+bütçesine yaklaşan bir host'ta hangi process'in öleceğine _kernel_'in OOM killer'ı karar
+veriyordu — sadece bu stack'inkileri değil, host'taki her process'i puanlar ve gerçekte
+büyüyen container hangisiyse onun yerine Postgres'i esirgemek için hiçbir sebebi yoktur. Bir
+`mem_limit`, bu kararı ait olduğu yere geri koyar: bir container yalnızca kendi tavanını aştığı
+için öldürülür ve başka bir servisin yaptığı hiçbir şey Postgres'i onunla birlikte
+düşüremez.
+
+| Servis     | `mem_limit` | Bu sayının nedeni                                                                                |
+| ---------- | ----------- | ------------------------------------------------------------------------------------------------ |
+| `postgres` | 512m        | Küçük bir ekibin board'u için cömert bir taban                                                   |
+| `api`      | 512m        | `REQUEST_BODY_MAX_BYTES` / `ATTACHMENT_MAX_BYTES` (`.env.example`) ikisi de heap'ine buffer'lar  |
+| `web`      | 512m        | Aynı Next.js SSR process'i, `api` ile aynı "seçilmemiş tavan" sorunu                             |
+| `migrate`  | 512m        | `api` ile aynı — aynı build stage, aynı Prisma CLI, yalnızca startup'ta bir kez                  |
+| `backup`   | 256m        | `pg_dump` buffer'lamak yerine stream eder; bu, process overhead'i ve attachment `tar`'ını kapsar |
+| `redis`    | 128m        | Yalnızca cache, session, rate limit, bildirim — asla board verisi, küçük ve sınırlı working set  |
+| `proxy`    | 128m        | TLS sonlandırır ve proxy'ler; gövdeler `api`'ninki gibi buffer'lanmak yerine Caddy'den geçer     |
+
+`api` ve `web`, 512m tavanlarının %75'i olan `NODE_OPTIONS=--max-old-space-size=384`'ü de
+ayarlar — böylece V8'in heap'i, Node'un kendi container-belleği sezgisine bırakılmak yerine
+açıkça sabitlenir. `mem_limit`'in altında kalan 128m'lik boşluk, tek başına bir heap tavanının
+kapsamadığı şeyler içindir (thread stack'leri, native buffer'lar, code space): V8, cgroup'un
+sert limitine varmadan önce kendi yakalanabilir "JavaScript heap out of memory" hatasına çarpar
+— bu da çıplak bir `SIGKILL` yerine `docker compose logs api` (ya da `web`) içinde bir satır
+olarak görünür.
+
+Bunlar birer tavan, rezervasyon değil — `mem_limit`'inden az kullanan bir container hiçbir ek
+maliyete yol açmaz, ve özellikle `migrate`, `api` ile `web` başlamayı bitirmeden önce (başarıyla)
+çıkar, dolayısıyla onlarla hiçbir zaman gerçekten eşzamanlı değildir. Uzun süre çalışan servisler
+— `postgres`, `api`, `web`, `redis`, `proxy` ve `backup` — tavanlarına aynı anda vurmuş gibi
+toplarsak (diğerleri ayaktayken zaten çıkmış olan `migrate` hariç), bu 512 + 512 + 512 + 128 +
+128 + 256 = 2048 MB eder, ki bu da bu sayfanın her zaman istediği 2 GB'a tam olarak denk gelir.
+Gerçek trafik altında bundan daha az boşluğu olan bir host, bu sayıları yükseltmek için bir
+sebeptir (`docker-compose.yml` düz bir düzenleme, ya da bunları bir
+`docker-compose.override.yml` içinde override edin) veya kutunun kendi RAM'ini artırmak için —
+tavanı kaldırmak için değil; bunun size ne kaybettireceği için yukarıdaki notu görün.
+
+**Ölçümle doğrulanmadı**: bu sayılar `.env.example`'da zaten belgelenmiş request/attachment
+tavanlarından ve V8'in kendi heap boyutlandırma kurallarından geliyor, stack'in her limitte
+yük altında çalıştırılmasından değil. Bir container gerçekte `mem_limit`'ine çarptığı için
+öldürülürse, `docker compose ps` onun çıktığını gösterir (genelde `137`), ve
+`docker compose logs <servis>` başlanacak yerdir — her servisin değil, o tek servisin limitini
+yükseltin.
 
 ## 1. DNS
 
@@ -54,8 +111,15 @@ mkdir -p /opt/kurul && cd /opt/kurul
 curl -fsSLO https://raw.githubusercontent.com/dravcore/kurul/main/docker-compose.yml
 curl -fsSL --create-dirs -o docker/Caddyfile \
   https://raw.githubusercontent.com/dravcore/kurul/main/docker/Caddyfile
+curl -fsSL --create-dirs -o scripts/backup.sh \
+  https://raw.githubusercontent.com/dravcore/kurul/main/scripts/backup.sh
+chmod +x scripts/backup.sh
 curl -fsSL -o .env https://raw.githubusercontent.com/dravcore/kurul/main/.env.example
 ```
+
+`scripts/backup.sh` isteğe bağlı değil: `docker-compose.yml` içindeki `backup` servisi tam
+olarak o yolu container'ına bind-mount eder ve dosya yoksa o servisin var olma amacı olan
+zamanlanmış yedekler hiç alınmaz.
 
 `.env`'i düzenleyin. Yalnızca Docker ile kurulumda önemli olan satırlar şunlar — dosyadaki geri
 kalan her şey ya geliştirme döngüsü için ya da çalışan bir varsayılana sahip:
@@ -74,8 +138,11 @@ SMTP_SECURE=false                              # yalnızca 465 portu için true
 MAIL_FROM=Kurul <kurul@example.com>
 ```
 
-İki gizli değeri `openssl rand -hex 32` ile üretin. `-base64` değil `-hex`: base64 çıktısı `/`
-içerebilir ve her iki değer de bir URL'in içine giriyor — orada bir slash URL'i keser.
+İki gizli değeri de `openssl rand -hex 32` ile üretin. `POSTGRES_PASSWORD` doğrudan bir bağlantı
+URL'inin içine giriyor; `-base64` çıktısındaki bir `/` orada URL'i keser — `-hex`'in alfabesinde
+(`0-9a-f`) böyle bir karakter yok. `BETTER_AUTH_SECRET` yalnızca byte byte karşılaştırılıyor,
+yani bu kısıtı taşımıyor, ama onu da `-hex` ile üretmek, değişken başına ayrı bir kural yerine
+tek bir üreticiyi akılda tutmak demek.
 
 `SITE_URL` şemayı taşır, çünkü Caddy'nin düz HTTP mi sunacağına yoksa sertifika mı alacağına
 karar veren şey odur. `https://…` otomatik HTTPS'i açar. `http://localhost` (varsayılan) ise
@@ -88,6 +155,36 @@ döngüsü içindir. Değiştirmek isteyebileceğiniz tek değer `ATTACHMENT_MAX
 `26214400`, 25 MiB) ve değiştirecekseniz önce
 [aşağıdaki proxy sözleşmesini](#kendi-reverse-proxynizi-kullanmak) okuyun: ters proxy, onunla
 birlikte hareket etmesi gereken ayrı ve bilinçli olarak daha yüksek bir tavan taşıyor.
+
+**Attachment depolaması varsayılan olarak sınırlıdır ve Postgres'in diskini paylaşır.**
+`attachment_data` volume'ü veritabanıyla aynı host dosya sisteminde yaşar; dolu bir disk yalnız
+yüklemeleri değil, Postgres'i durdurur. Toplamı iki değişken sınırlar
+([ADR 0027](decisions/0027-attachment-quotas.md), 2026-08-21'de güncellendi):
+`ATTACHMENT_WORKSPACE_QUOTA_BYTES` (workspace başına saklanan dosya baytlarının toplamı) ve
+`ATTACHMENT_INSTANCE_QUOTA_BYTES` (instance'ın tamamı). Ayarlanmadıklarında **workspace başına
+2 GiB (`2147483648`), instance başına 20 GiB (`21474836480`)** geçerlidir; yazılı bir `0` ilgili
+tavanı tamamen kaldırır, negatif değer açılışta reddedilir. Diskini önemsediğiniz her makinede
+instance olanını volume'ün gerçek boş alanının altına ayarlayın. API geçerli sayıları açılışta
+loglar (`docker compose logs api` içinde `Attachment ceilings: … (default)` / `(env)`) ve
+workspace kotası instance kotasının üstüne ayarlanmışsa reddetmek yerine uyarır.
+Boyutlandırırken bilin: kotalar **yumuşaktır** (eşzamanlı yüklemeler en fazla birer dosya
+aşabilir; birkaç `ATTACHMENT_MAX_BYTES` kadar pay bırakın) ve silinen dosyalar baytlarını gecelik
+orphan süpürmesinin bekleme süresi geçene kadar tutar; yani disk kullanımı, kota muhasebesini
+kısa süre aşabilir. Bağlantı ekleri bayt saklamaz ve hiç sayılmaz. Reddedilen yükleme, JSON
+gövdesi `error: "Attachment Quota Exceeded"` taşıyan bir `413`'tür, bkz.
+[413'leri birbirinden ayırmak](#413leri-birbirinden-ayırmak).
+
+**Yüklemelerin dakikada bayt bütçesi de var.** `ATTACHMENT_UPLOAD_BYTES_PER_MINUTE` (varsayılan
+`268435456`, 256 MiB, yaklaşık on tam boy yükleme) bir istemci IP'sinin sabit bir dakika içinde
+yükleme rotasına gönderebileceği en fazla bayttır; her isteğin `Content-Length`'i gövde
+okunmadan önce bütçeden düşülür (`Content-Length` taşımayan bir multipart istek
+`ATTACHMENT_MAX_BYTES` kadar düşülür). Var olma nedeni, rota başına istek throttle'ının istek
+saymasıdır; disk için yanlış birim budur. `0` kapatır. Diğer bütün limitlerle aynı istemci
+IP'sine göre anahtarlanır, dolayısıyla proxy'nin arkasını görmesi için pakete dahil Compose
+dosyasının zaten taşıdığı `TRUST_PROXY` ayarına ihtiyaç duyar; sayaçlar Redis'te yaşar, Redis
+hata verdiği sürece süreç belleğine düşer. Bütçe aşımı, JSON gövdesi
+`error: "Upload Budget Exceeded"` ve `Retry-After` başlığı taşıyan bir `429`'dur
+([api-conventions.md](api-conventions.md#rate-limiting)).
 
 **Trello import'u için de burada bir satır gerekmiyor.** `TRELLO_IMPORT_MAX_BYTES` (varsayılan
 `20971520`, 20 MiB) importer'ın kabul edeceği en büyük board export'udur ve pakete dahil Compose
@@ -116,7 +213,7 @@ satırı atlar. Sağlıklı bir stack şöyle görünür:
 
 ```
 api        Up 27 seconds (healthy)
-backup     Up 28 seconds
+backup     Up 28 seconds (health: starting)
 migrate    Exited (0) 27 seconds ago
 postgres   Up 34 seconds (healthy)
 proxy      Up 16 seconds
@@ -126,8 +223,11 @@ web        Up 22 seconds (healthy)
 
 `migrate` satırındaki `Exited (0)` başarı demektir — migration'lar uygulandı, iş bitti. Peşine
 düşülmesi gereken, sıfırdan farklı bir çıkış kodudur (`docker compose logs migrate`); o durumda
-`api` zaten hiç başlamamış olur. `backup` ve `proxy` yanında `(healthy)` yazmaması, bir sorun
-olduğu için değil, ikisinin de healthcheck tanımlamamış olmasındandır.
+`api` zaten hiç başlamamış olur. `proxy` yanında `(healthy)` hiç yazmaz, çünkü hiç healthcheck
+tanımlamaz. `backup` bir healthcheck tanımlar — `/backups` içinde taze bir dump arar — ama
+`start_period`'ı geniştir (10 dakika), yani ilk `pg_dump`'ını henüz alan bir veritabanı
+unhealthy değil `(health: starting)` görünür; zaman tanıyıp `docker compose ps backup` ile
+tekrar bakın.
 
 `https://kurul.example.com` adresine ilk istek, Caddy ACME doğrulamasını tamamlarken birkaç
 saniye sürebilir. Sürmezse olan biteni izleyin:
@@ -210,6 +310,28 @@ Parametrelerin tamamı — 5 dakikalık aralık, alarmdan önce 2 ardışık ba�
 [Uptime izleme](development.md#uptime-izleme--kesintiyi-asıl-yakalayan-bu-kurun)
 bölümünde; internetten erişilemeyen bir örnek için push tabanlı alternatif de orada.
 
+**Yedek tazeliğini de izleyin — `/api/health/ready` bunu kapsamaz.** `backup` sidecar'ı,
+API'nin readiness probe'unun kontrol ettiği veritabanı bağlantısına hiç dokunmadan dump
+üretmeyi durdurabilir (sürekli başarısız olan bir `pg_dump`, dolan bir volume) — o zaman bu
+endpoint kesintinin tamamı boyunca yeşil kalır. Bunun yerine sinyal, `backup`'ın kendi Docker
+healthcheck'idir: unhealthy, `/backups/kurul-*.dump` içindeki en yeni dosyanın
+`2 × BACKUP_INTERVAL`'dan (varsayılan 24 saatlik aralıkta 48 saat) daha eski olduğu anlamına
+gelir — bu da API'nin kendi retention süpürmesinin artık yakın zamanlı bir dump'a
+güvenemeyeceği noktadır. Monitör aracınızın container-health kontrolünü (Docker'ı destekleyen
+çoğu uptime aracı, ya da host üzerinde bir cron `docker inspect`) buna yönlendirin, ya da en
+azından zaman zaman elle kontrol edin:
+
+```bash
+docker compose ps backup                                        # "(healthy)" veya "(unhealthy)"
+docker inspect --format '{{.State.Health.Status}}' kurul-backup-1
+```
+
+`(unhealthy)` bir `backup`'ın yeniden başlatılmaya ihtiyacı yoktur — `restart: unless-stopped`
+health durumuna göre hareket etmez, sidecar kendi kendine çalışmaya ve denemeye devam eder —
+ihtiyacı olan şey `docker compose logs backup` okumaktır, çünkü gerçekten bir şey (genellikle
+başarısız olan bir `pg_dump`) yanlış gitmiştir ve düzeltilmediği sürece bir sonraki
+zamanlanmış döngü aynı sorunu devralır.
+
 Sonra bilerek bir kez tetikleyin, çünkü hiç ateşlenmemiş bir alarm kurulumu bir güvence değil
 bir varsayımdır:
 
@@ -231,7 +353,9 @@ SMTP olmadan sert biçimde bozulan tek özellik davetlerdir: bir daveti kabul et
 bir e-posta adresi gerektirir, doğrulama da iletilmiş bir mesaj
 ([ADR 0013](decisions/0013-invitation-email-verification.md)). `SMTP_HOST` boşken API yine
 açılır ve mesajı göndermek yerine log'a yazar; yani tek kişilik kurulum sorunsuz çalışır — ama
-kimse workspace'inize katılamaz. Üyeler ekranı bunu üründe de söyler.
+kimse workspace'inize katılamaz. Üyeler ekranı bunu üründe de söyler. Bildirim e-postaları
+(atama, mention, due-soon) aynı ayarları kullanır ve onlar olmadan yalnızca kapalı kalır; SMTP
+çalıştığında her kullanıcı bunları Ayarlar'dan kendisi için kapatabilir.
 
 Her SMTP sağlayıcısı çalışır. En sık iki şey ters gider:
 
@@ -282,6 +406,26 @@ docker compose pull && docker compose up -d
 Migration'lar otomatik çalışır: tek seferlik `migrate` servisi, `api` başlamadan önce bekleyen
 migration'ları uygular. `latest`'i takip etmek yerine bilinçli upgrade etmeyi tercih
 ediyorsanız `.env`'de `TAG=v0.2.0` ile bir sürümü sabitleyin.
+
+### Attachment kotalarının artık varsayılanı var
+
+`v0.2.0` sonrası sürümler, `ATTACHMENT_WORKSPACE_QUOTA_BYTES` / `ATTACHMENT_INSTANCE_QUOTA_BYTES`
+ayarlanmadığında attachment depolamasını workspace başına 2 GiB, instance başına 20 GiB ile
+sınırlar (eskiden sınırsız demekti). **Halihazırda 2 GiB'den fazla dosya tutan bir workspace,
+bir sonraki yüklemesinde `413` alır**; bunu istemiyorsanız upgrade'den önce daha yüksek bir sayı
+ya da sınırsız için `0` yazın. Nerede durduğunuzu tek sorgu söyler; ilki instance'ın, ikincisi
+workspace başına toplam:
+
+```bash
+docker compose exec postgres psql -U kurul -d kurul -c \
+  "SELECT COALESCE(SUM(size), 0) AS instance_bytes FROM \"Attachment\" WHERE kind = 'FILE';"
+docker compose exec postgres psql -U kurul -d kurul -c \
+  "SELECT w.slug, SUM(a.size) AS bytes FROM \"Attachment\" a JOIN \"Task\" t ON t.id = a.\"taskId\" JOIN \"Board\" b ON b.id = t.\"boardId\" JOIN \"Workspace\" w ON w.id = b.\"workspaceId\" WHERE a.kind = 'FILE' GROUP BY w.slug ORDER BY bytes DESC;"
+```
+
+Sayıları `2147483648` ve `21474836480` ile karşılaştırın. Aynı upgrade, IP başına bir yükleme
+bayt bütçesi de getiriyor (`ATTACHMENT_UPLOAD_BYTES_PER_MINUTE`, varsayılan dakikada 256 MiB);
+bu yalnızca tek adresten dakikada ondan fazla tam boy dosya yükleyen bir istemciyi ilgilendirir.
 
 ### Kurultay'dan geliyorsanız (v0.1.0)
 
@@ -348,8 +492,10 @@ cosign verify \
   ghcr.io/dravcore/kurul-api:v0.2.0
 ```
 
-Aynısını `kurul-web` için tekrarlayın; başka bir sürümü doğrularken `v0.2.0`'ı iki yerde de
-değiştirin. Sürüm iki kez geçiyor çünkü iki farklı şeyi anlatıyor: biri imzalayan workflow'un
+Aynısını `kurul-web` için — ve v0.2.0'dan sonraki sürümlerde, kendisini ilk yayınlayan
+sürümden itibaren aynı şekilde imzalanan `kurul-migrate` için — tekrarlayın; başka bir sürümü
+doğrularken `v0.2.0`'ı iki yerde de değiştirin. Sürüm iki kez geçiyor çünkü iki farklı şeyi
+anlatıyor: biri imzalayan workflow'un
 üzerinde çalıştığı git ref'i, diğeri sorduğunuz imaj tag'i.
 
 **Bütün kontrol bu iki `--certificate-*` bayrağıdır; onları atmayın.** Burada korunacak bir
@@ -398,6 +544,8 @@ kurul-api-v0.2.0-linux-arm64.spdx.json
 kurul-web-v0.2.0-linux-amd64.spdx.json
 kurul-web-v0.2.0-linux-arm64.spdx.json
 ```
+
+v0.2.0'dan sonraki sürümler aynı çifti `kurul-migrate` için de ekler.
 
 Format SPDX 2.3 JSON; `grype`, `trivy` ve Dependency-Track'in üçü de dönüştürmeden okur:
 
@@ -477,11 +625,12 @@ megabayttan büyük her eki reddeder.
 Her iki katman da boyutu aşan bir yüklemeye `413` ile cevap verir — ve yüklemelerle hiç ilgisi
 olmayan üçüncü bir limit de öyle. **Hangisinin reddettiğini cevap gövdesi söyler**:
 
-| Aldığınız cevap                              | Reddeden | Anlamı                                                          |
-| -------------------------------------------- | -------- | --------------------------------------------------------------- |
-| `statusCode` taşıyan **JSON** gövdeli `413`  | API      | tasarlandığı gibi — dosya `ATTACHMENT_MAX_BYTES`'ı aşıyor       |
-| **Boş** gövdeli `413` (`Content-Length: 0`)  | proxy    | gövde proxy'nin tavanını aştı; bu kaba kesim                    |
-| `Request body is too large` yazan JSON `413` | API      | yükleme bile değil — `REQUEST_BODY_MAX_BYTES`'ı aşan JSON gövde |
+| Aldığınız cevap                                    | Reddeden | Anlamı                                                            |
+| -------------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| `statusCode` taşıyan **JSON** gövdeli `413`        | API      | tasarlandığı gibi — dosya `ATTACHMENT_MAX_BYTES`'ı aşıyor         |
+| **Boş** gövdeli `413` (`Content-Length: 0`)        | proxy    | gövde proxy'nin tavanını aştı; bu kaba kesim                      |
+| `Request body is too large` yazan JSON `413`       | API      | yükleme bile değil — `REQUEST_BODY_MAX_BYTES`'ı aşan JSON gövde   |
+| `error: "Attachment Quota Exceeded"` taşıyan `413` | API      | dosya sığıyor, depolama sığmıyor — bir kota dolu (yukarıya bakın) |
 
 Birinci satır, boyutu aşan bir ek için normal cevaptır ve kullanıcının bir şey yapabileceği
 cevaptır: limiti adlandırır. İkincisi, proxy'nin gövdeyi API hiç görmeden reddetmesidir —
@@ -494,8 +643,13 @@ API'ninki neden 25" bölümüne bakın).
 sınırlar ve hiçbir attachment oradan geçmez. Bunu görüyorsanız ne storage'ınızda ne proxy'nizde
 yanlış bir şey var; bir istek yalnızca API'nin kabul ettiğinden fazla JSON göndermiştir.
 
-Bir dördüncüsü daha var ve onu yalnızca tek bir uç üretebilir:
-`POST /workspaces/…/imports/trello` üzerindeki bir `413`, yukarıdaki üçünden hiçbiri değil,
+Dördüncü satır ise başka bir başarısızlıktır: dosya `ATTACHMENT_MAX_BYTES`'ın altındadır, ama onu
+saklamak bir workspace'i ya da instance'ı kendi kotasının üzerine çıkarır. Boyutlandırma için
+yukarıdaki "Attachment depolaması siz sınırlamadıkça sınırsızdır ve Postgres'in diskini paylaşır"
+bölümüne bakın: `ATTACHMENT_WORKSPACE_QUOTA_BYTES` ve `ATTACHMENT_INSTANCE_QUOTA_BYTES`.
+
+Bir beşincisi daha var ve onu yalnızca tek bir uç üretebilir:
+`POST /workspaces/…/imports/trello` üzerindeki bir `413`, yukarıdaki dördünden hiçbiri değil,
 `TRELLO_IMPORT_MAX_BYTES`'tır (20 MiB). Ayırt eden şey cevap zarfındaki `path` alanıdır. Kullanıcı
 bunu 20 MiB'ın **altındaki** bir export'ta alıyorsa gövdeyi önce proxy kesmiştir ve bakılacak tavan
 proxy'ninkidir.
@@ -573,13 +727,15 @@ dönersiniz — bu bir eksiklik değil, bilinçli takastır.
 
 ## Sorun giderme
 
-**`docker compose pull` `denied` ile bitiyor.** `api` ve `web` imajlarını, bir release tag'inde
-çalışan bir workflow yayınlar; dolayısıyla `v0.2.0` ve sonrası için varlar, daha eskisi için
-yoklar. Bunlardan önceki bir sürümdeyken iki sonuç doğar. `docker compose pull`, `postgres`,
-`redis` ve `caddy`'yi başarıyla indirdikten sonra sıfırdan farklı bir kodla çıkar — yalnızca
-çıkış koduna değil çıktının sonuna bakın, çünkü başarılı olan üçü, olmayan ikisini ekrandan
-yukarı kaydırır. Bir de 2. adımda indirdiğiniz dosyalar `main` dalından gelir ve `main` yalnızca
-en son release'in taşıdığını taşır: `docker-compose.yml` içinde `proxy:` servisi yoksa ve
+**`docker compose pull` `denied` ile bitiyor.** İmajları, bir release tag'inde çalışan bir
+workflow yayınlar; dolayısıyla her biri yalnızca kendisini ilk taşıyan sürümden itibaren var:
+`api` ve `web` `v0.2.0`'dan, `kurul-migrate` ise `v0.2.0`'dan sonraki ilk sürümden itibaren —
+`v0.2.0`'da diğer ikisi çözülse bile o tek imaj için pull başarısız olur. Bir imajdan önceki
+bir sürümdeyken iki sonuç doğar. `docker compose pull`, `postgres`, `redis` ve `caddy`'yi
+başarıyla indirdikten sonra sıfırdan farklı bir kodla çıkar — yalnızca çıkış koduna değil
+çıktının sonuna bakın, çünkü başarılı olanlar, olmayanları ekrandan yukarı kaydırır. Bir de 2.
+adımda indirdiğiniz dosyalar `main` dalından gelir ve `main` yalnızca en son release'in
+taşıdığını taşır: `docker-compose.yml` içinde `proxy:` servisi yoksa ve
 indirilecek bir `docker/Caddyfile` yoksa release'in ilerisindesiniz demektir ve bu rehberdeki
 HTTPS'in hiçbiri az önce indirdiğiniz şey için geçerli değildir. Ya release'i bekleyin ya da
 çekmek yerine kaynaktan build edin:
@@ -590,8 +746,8 @@ docker compose up -d --build
 ```
 
 Tek fark bunun daha yavaş olmasıdır — api imajı bir dakika kadar build alır.
-`docker-compose.yml` her iki servis için bilinçli olarak hem `image:` hem `build:` taşır; böylece
-aynı dosya, çözülebilen bir yayınlanmış imaj varsa ondan, yoksa kaynaktan kurar.
+`docker-compose.yml` üç servisin üçü için de bilinçli olarak hem `image:` hem `build:` taşır;
+böylece aynı dosya, çözülebilen bir yayınlanmış imaj varsa ondan, yoksa kaynaktan kurar.
 
 **Sertifika bir türlü alınmıyor.** 80 ve 443 portlarının ikisi de public internetten sunucuya
 ulaşabilmeli ve DNS çoktan çözülüyor olmalı. `docker compose logs proxy` hatanın adını verir.

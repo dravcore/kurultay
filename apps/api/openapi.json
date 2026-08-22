@@ -468,7 +468,7 @@
             }
           },
           "413": {
-            "description": "The **file part** is over `ATTACHMENT_MAX_BYTES` (default `26214400` — 25 MiB), which is a disk ceiling and is unrelated to `REQUEST_BODY_MAX_BYTES`: multipart bodies are read by multer, which the JSON body limit never sees. A reverse proxy in front of this API caps the whole request body separately and higher, and answers `413` with something that is not JSON at all — the response body is what tells the two apart.",
+            "description": "Two distinct ceilings answer with this status, told apart by the envelope's `error` field. `\"Payload Too Large\"`: the **file part** is over `ATTACHMENT_MAX_BYTES` (default `26214400` — 25 MiB), which is a disk ceiling and is unrelated to `REQUEST_BODY_MAX_BYTES`: multipart bodies are read by multer, which the JSON body limit never sees. `\"Attachment Quota Exceeded\"`: the file fits on its own but would push the workspace's or the instance's stored FILE bytes past its quota (`ATTACHMENT_WORKSPACE_QUOTA_BYTES`, default 2 GiB, or `ATTACHMENT_INSTANCE_QUOTA_BYTES`, default 20 GiB; `0` lifts one; ADR 0027). A reverse proxy in front of this API caps the whole request body separately and higher, and answers `413` with something that is not JSON at all — the response body is what tells the layers apart.",
             "content": {
               "application/json": {
                 "schema": {
@@ -540,8 +540,32 @@
             }
           },
           "429": {
-            "description": "Over this route's per-IP budget. Carries `Retry-After` with the seconds to wait.",
+            "description": "Two budgets answer with this status, told apart by the envelope's `error` field. `\"Too Many Requests\"`: more than 20 requests from this IP in the current minute, like any other throttled route. `\"Upload Budget Exceeded\"`: the bytes this IP has submitted to this route in the current minute, counted by `Content-Length` before the body is read, would pass `ATTACHMENT_UPLOAD_BYTES_PER_MINUTE` (default `268435456`, 256 MiB; `0` turns the budget off). A multipart request without `Content-Length` is charged `ATTACHMENT_MAX_BYTES`. Both carry `Retry-After` with the seconds to wait.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Correlation id for this request — the same value as the error envelope `requestId` and the server log lines. Echoed from the request when the client supplied a URL-safe value of 8-128 characters, generated otherwise.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests allowed for this route, in the current window.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests left in the current window. Never negative.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "Seconds until the current window expires.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
               "Retry-After": {
                 "description": "Seconds to wait before retrying.",
                 "schema": {
@@ -1578,7 +1602,7 @@
         ]
       },
       "patch": {
-        "description": "Not workspace-scoped and deliberately not role-gated: the subject is the caller, so the session guard is the whole authorization story. Interface language is the only field today, and `null` is a distinct state from `\"en\"` — it means \"follow the browser\".",
+        "description": "Not workspace-scoped and deliberately not role-gated: the subject is the caller, so the session guard is the whole authorization story. Two fields: the interface language, where `null` is a distinct state from `\"en\"` (it means \"follow the browser\"), and `emailNotifications`, the per-user switch for notification email.",
         "operationId": "AuthController_updateMe",
         "parameters": [],
         "requestBody": {
@@ -1757,7 +1781,7 @@
             }
           }
         },
-        "summary": "Deletes the caller's account: `204`, and the session it was sent with is over.\n\nThe cookies are cleared on the way out because Better Auth's `session.cookieCache` answers\nfrom a signed cookie for up to five minutes without consulting the database, so deleting\nthe `Session` rows does not by itself stop this browser presenting a valid session. Clearing\nthem here closes that window for the browser that asked — which is every browser on this\npath (ADR 0026 §\"Consequences\" covers the administrator path, where it cannot be closed).",
+        "summary": "Deletes the caller's account: `204`, and the session it was sent with is over.\n\nThe cookies are cleared on the way out because Better Auth's `session.cookieCache` answers\nfrom a signed cookie for up to 60 seconds without consulting the database, so deleting\nthe `Session` rows does not by itself stop this browser presenting a valid session. Clearing\nthem here closes that window for the browser that asked — which is every browser on this\npath (ADR 0026 §\"Consequences\" covers the administrator path, where it cannot be closed).",
         "tags": ["Account"],
         "security": [
           {
@@ -12307,12 +12331,24 @@
             "enum": ["en", "tr"],
             "type": "string"
           },
+          "emailNotifications": {
+            "type": "boolean",
+            "description": "Whether assignment, mention and due-soon notifications are also sent by email. One switch\nfor every kind. Has no effect while `InstanceConfigDto.mailEnabled` is `false`."
+          },
           "createdAt": {
             "type": "string",
             "description": "ISO 8601 UTC."
           }
         },
-        "required": ["id", "email", "name", "avatarUrl", "locale", "createdAt"]
+        "required": [
+          "id",
+          "email",
+          "name",
+          "avatarUrl",
+          "locale",
+          "emailNotifications",
+          "createdAt"
+        ]
       },
       "UpdateMeDto": {
         "type": "object",
@@ -12322,6 +12358,10 @@
             "nullable": true,
             "description": "Nullable on purpose: clearing the preference puts the user back on their browser's\n`Accept-Language`, which a user who set a language on someone else's machine should be\nable to undo. Omitting the key leaves the stored value alone.\n\nValidated against `SUPPORTED_LOCALES` rather than a loose IETF-tag pattern, so the column\ncan only ever hold a tag the app actually ships a catalog for.",
             "enum": ["en", "tr"]
+          },
+          "emailNotifications": {
+            "type": "boolean",
+            "description": "Not nullable: the column has a default and \"no preference\" is not a state it can hold.\nOmitting the key leaves the stored value alone."
           }
         }
       },

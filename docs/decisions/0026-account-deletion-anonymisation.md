@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-08-15
+**Updated:** 2026-08-18 — the deletion also removes every `WorkspaceInvitation` addressed to the departing user, in any state: `email` is a literal column anonymising the `User` row never touched, so the real address outlived the erasure request (audit finding DB-01).
+**Updated:** 2026-08-18 — `session.cookieCache.maxAge` (`api/src/auth/auth.ts`) shrank from 5 minutes to 60 seconds, so the "five minutes" figures below describing the deleted-account cookie window are historical: the actual window this ADR accepts is now up to 60 seconds (audit finding SEC-01).
 
 > 🌐 English (canonical) | [Türkçe](../tr/decisions/0026-account-deletion-anonymisation.md)
 

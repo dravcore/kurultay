@@ -1,6 +1,6 @@
-import { IsIn } from 'class-validator';
+import { IsBoolean, IsIn } from 'class-validator';
 import { SUPPORTED_LOCALES, type Locale } from '@kurul/shared-types';
-import { OptionalNullable } from '../../common/validation/optional';
+import { OptionalNonNullable, OptionalNullable } from '../../common/validation/optional';
 
 export class UpdateMeDto {
   /**
@@ -14,4 +14,12 @@ export class UpdateMeDto {
   @OptionalNullable()
   @IsIn(SUPPORTED_LOCALES)
   locale?: Locale | null;
+
+  /**
+   * Not nullable: the column has a default and "no preference" is not a state it can hold.
+   * Omitting the key leaves the stored value alone.
+   */
+  @OptionalNonNullable()
+  @IsBoolean()
+  emailNotifications?: boolean;
 }

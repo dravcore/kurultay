@@ -23,6 +23,11 @@ export class UserSchema implements UserDto {
    * `Accept-Language`.
    */
   locale!: Locale | null;
+  /**
+   * Whether assignment, mention and due-soon notifications are also sent by email. One switch
+   * for every kind. Has no effect while `InstanceConfigDto.mailEnabled` is `false`.
+   */
+  emailNotifications!: boolean;
   /** ISO 8601 UTC. */
   createdAt!: string;
 }

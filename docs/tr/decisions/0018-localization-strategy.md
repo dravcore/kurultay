@@ -2,6 +2,9 @@
 
 **Durum:** Kabul edildi
 **Tarih:** 2026-08-12
+**Güncellendi:** 2026-08-21: aşağıdaki iki key sayısı farklı anların fotoğrafı ve o zamandan beri
+birlikte ilerledi: `en.json` ve `tr.json` bugün her biri 514 yaprak key taşıyor, katalog-parity
+kapısının şart koştuğu gibi hâlâ birbirine eşit.
 
 > 🌐 [English (kanonik)](../../decisions/0018-localization-strategy.md) | Türkçe
 
@@ -118,9 +121,9 @@ User.locale  →  locale çerezi  →  Accept-Language  →  'en'
   key key eşleşene kadar katalog parity testini düşürür. Veri migration'ı yok, `User.locale`
   backfill'i yok — sütun nullable kalır ve null "tarayıcıyı izle" demeye devam eder.
 - `GET /me`, `User.locale`'i session'dan değil veritabanından okur. Better Auth session
-  kullanıcısını beş dakika boyunca bir çerezde önbelleğe alır ve web'in zinciri `/me`'ye
-  başvurur; session'da taşınan bir locale, kullanıcı dili değiştirdikten sonra arayüzü beş
-  dakikaya kadar eski dilde bırakırdı.
+  kullanıcısını 60 saniye boyunca bir çerezde önbelleğe alır ve web'in zinciri `/me`'ye
+  başvurur; session'da taşınan bir locale, kullanıcı dili değiştirdikten sonra arayüzü 60
+  saniyeye kadar eski dilde bırakırdı.
 - **§4'ün koşulu karşılandı: Türkçe geldi.** İngilizce arayüz tamamlandığı için
   `messages/tr.json` onun karşısına yazıldı — 486 key, aynı key kümesi, aynı ICU argümanları.
   Tohum kolon adları bir `tr` satırı kazandı (`Yapılacak / Devam Ediyor / Bitti`) ve iki

@@ -1,4 +1,10 @@
-import { Injectable, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { Readable } from 'node:stream';
 import type { StorageBackend } from './storage-backend';
 import {
@@ -7,6 +13,7 @@ import {
   getStorageBackend,
   getStorageConfig,
 } from './storage';
+import { describeStorageCeilings, storageConfigWarnings } from './storage-config';
 
 /**
  * The DI-facing face of the storage module.
@@ -21,7 +28,28 @@ import {
  * one decision not to imitate (ADR 0022).
  */
 @Injectable()
-export class StorageService implements OnModuleDestroy {
+export class StorageService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(StorageService.name);
+
+  /**
+   * Says at boot which ceilings this instance runs under and which of them nobody chose.
+   *
+   * The quota defaults exist for the operator who never reads the quota section, and a default
+   * that refuses an upload is only fair if the log said so first. Logged only when attachments
+   * are on: with `STORAGE_PATH` unset there is nothing for a quota to cap. The warnings are the
+   * combinations `readStorageConfig` accepts but an operator probably did not mean.
+   */
+  onModuleInit(): void {
+    if (!this.persistsFiles) {
+      return;
+    }
+    const config = getStorageConfig();
+    this.logger.log(describeStorageCeilings(config));
+    for (const warning of storageConfigWarnings(config)) {
+      this.logger.warn(warning);
+    }
+  }
+
   get persistsFiles(): boolean {
     return attachmentsEnabled();
   }
@@ -29,6 +57,21 @@ export class StorageService implements OnModuleDestroy {
   /** The API half of the two-layer size limit; the proxy carries the same number (ADR 0024). */
   get maxBytes(): number {
     return getStorageConfig().maxBytes;
+  }
+
+  /** Per-workspace ceiling on stored FILE bytes; `0` means unlimited (ADR 0027). */
+  get workspaceQuotaBytes(): number {
+    return getStorageConfig().workspaceQuotaBytes;
+  }
+
+  /** Instance-wide ceiling on stored FILE bytes; `0` means unlimited (ADR 0027). */
+  get instanceQuotaBytes(): number {
+    return getStorageConfig().instanceQuotaBytes;
+  }
+
+  /** Bytes one client IP may submit to the upload route per minute; `0` means no budget. */
+  get uploadBytesPerMinute(): number {
+    return getStorageConfig().uploadBytesPerMinute;
   }
 
   /**

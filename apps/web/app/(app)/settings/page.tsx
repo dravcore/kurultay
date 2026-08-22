@@ -4,6 +4,7 @@ import { AccountSettings } from '@/components/settings/account-settings';
 import { ActivationFunnel } from '@/components/settings/activation-funnel';
 import { LanguageSettings } from '@/components/settings/language-settings';
 import { MembersSettings } from '@/components/settings/members-settings';
+import { NotificationSettings } from '@/components/settings/notification-settings';
 import { WorkspaceSettings } from '@/components/settings/workspace-settings';
 
 /**
@@ -50,6 +51,14 @@ export default async function SettingsPage(): Promise<React.ReactElement> {
           </SettingsSection>
           <SettingsSection title={t('language.title')} description={t('language.description')}>
             <LanguageSettings />
+          </SettingsSection>
+          {/* Next to language: both are about the person rather than the workspace, both are
+              set once, and the language section already mentions the email this one controls. */}
+          <SettingsSection
+            title={t('notifications.title')}
+            description={t('notifications.description')}
+          >
+            <NotificationSettings />
           </SettingsSection>
           {/* Near the end: it holds a control with no undo (delete the workspace), and every
               section above it is either read constantly (members) or set once and forgotten

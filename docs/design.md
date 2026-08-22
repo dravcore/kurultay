@@ -384,7 +384,7 @@ the Phase 1 skeleton because retrofitting it costs far more than starting with i
 
 ## 8. Charts and dashboard
 
-For [Phase 7](archive/roadmap-mvp-phases.md#phase-7--dashboard), rendered with Recharts. Form is chosen by the
+For the dashboard ([ROADMAP.md](../ROADMAP.md#shipped-mvp-summary), Phase 7), rendered with Recharts. Form is chosen by the
 reader's job, before any color decision. Never a dual y-axis, never a pie past two slices,
 never a generated ninth hue — fold the tail into "Other" or facet into small multiples.
 
@@ -458,11 +458,11 @@ Target **WCAG 2.1 AA** in both themes, verified per token pair rather than per s
 
 ## 10. Cross-references
 
-| Document                                                                                   | What it binds here                                                                                                                                                |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [coding-standards.md](coding-standards.md#nextjs-appsweb)                                  | `components/ui/` is shadcn output only — tokens are edited in the theme, never in a primitive; no arbitrary hex in components; conditional classes through `cn()` |
-| [architecture.md](architecture.md#4-appsweb--structure)                                    | The `(auth)` / `(app)` route groups and the `board/`, `task/`, `dashboard/`, `layout/` component domains this document lays out                                   |
-| [api-conventions.md](api-conventions.md#errors)                                            | The problem-JSON shape error copy derives from, and the rule to branch on `statusCode`                                                                            |
-| [MVP phase checklist — Phase 3](archive/roadmap-mvp-phases.md#phase-3--boards-and-columns) | Phase 3 lands tokens, shell, and board chrome; Phase 4 the drag interaction and detail panel; Phase 5 priority and label rendering; Phase 7 the charts            |
-| [`decisions/0003-frontend-stack.md`](decisions/0003-frontend-stack.md)                     | Next.js 16 + Tailwind + shadcn/ui + @dnd-kit + Recharts — the toolkit every rule above is written against                                                         |
-| [tech-stack.md](tech-stack.md)                                                             | Why that toolkit                                                                                                                                                  |
+| Document                                                               | What it binds here                                                                                                                                                |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [coding-standards.md](coding-standards.md#nextjs-appsweb)              | `components/ui/` is shadcn output only — tokens are edited in the theme, never in a primitive; no arbitrary hex in components; conditional classes through `cn()` |
+| [architecture.md](architecture.md#4-appsweb--structure)                | The `(auth)` / `(app)` route groups and the `board/`, `task/`, `dashboard/`, `layout/` component domains this document lays out                                   |
+| [api-conventions.md](api-conventions.md#errors)                        | The problem-JSON shape error copy derives from, and the rule to branch on `statusCode`                                                                            |
+| [Shipped MVP summary](../ROADMAP.md#shipped-mvp-summary)               | Phase 3 lands tokens, shell, and board chrome; Phase 4 the drag interaction and detail panel; Phase 5 priority and label rendering; Phase 7 the charts            |
+| [`decisions/0003-frontend-stack.md`](decisions/0003-frontend-stack.md) | Next.js 16 + Tailwind + shadcn/ui + @dnd-kit + Recharts — the toolkit every rule above is written against                                                         |
+| [tech-stack.md](tech-stack.md)                                         | Why that toolkit                                                                                                                                                  |

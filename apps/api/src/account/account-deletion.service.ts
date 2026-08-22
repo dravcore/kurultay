@@ -11,6 +11,7 @@ import type {
   SoleOwnedWorkspaceDto,
 } from '@kurul/shared-types';
 import type { Prisma } from '../generated/prisma';
+import { escapeLikePattern } from '../common/escape-like';
 import { stdoutWriter, type LogWriter } from '../common/logging/json-log';
 import { redactMentionsOf } from '../common/mentions/redact-mentions';
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,6 +46,14 @@ export interface AccountDeletionCounts {
   membershipsRemoved: number;
   assignmentsRemoved: number;
   invitationsRevoked: number;
+  /**
+   * Invitations addressed *to* the departing account, whatever their state.
+   *
+   * Counted apart from `invitationsRevoked` because they are a different claim: that one is
+   * "this account stops vouching for anybody", this one is "this account's address stops
+   * existing in the database".
+   */
+  invitationsReceivedDeleted: number;
   commentsRedacted: number;
   activitiesRedacted: number;
   sessionsDeleted: number;
@@ -338,6 +347,7 @@ export class AccountDeletionService {
           membershipsRemoved: 0,
           assignmentsRemoved: 0,
           invitationsRevoked: 0,
+          invitationsReceivedDeleted: 0,
           commentsRedacted: 0,
           activitiesRedacted: 0,
           sessionsDeleted: 0,
@@ -421,6 +431,42 @@ export class AccountDeletionService {
           })
         ).count;
 
+        // The other side of the same table, and the one anonymisation cannot reach.
+        // `WorkspaceInvitation.email` is a literal address in a column of its own — nothing
+        // about it is derived from `User`, so rewriting the `User` row to
+        // `deleted-<id>@deleted.invalid` leaves every invitation ever sent to this person still
+        // spelling out where they can be reached. An erasure request that leaves the address in
+        // the database has not erased it (audit finding DB-01).
+        //
+        // Every state, not only `pending`: unlike the inviter side above, the accepted row is
+        // not somebody else's record of something that happened *to them* — it is a copy of the
+        // departing person's own contact details, and there is no reading of Article 17 under
+        // which that survives the request. What is kept is the workspace's history of the
+        // membership itself, which lives in `WorkspaceMember` and `Activity` and never carried
+        // the address.
+        //
+        // **Plain equality on the lower-cased address, and `mode: 'insensitive'` is not an
+        // option here.** Prisma compiles `equals` + `mode: 'insensitive'` on PostgreSQL to
+        // `ILIKE`, and it passes the operand through as a pattern rather than as a literal — so
+        // every `_` and `%` in the departing person's own address becomes a wildcard. Deleting
+        // `john_doe@example.com` would have matched `john.doe@example.com` and
+        // `johnXdoe@example.com` as well, in *every* workspace on the instance, including live
+        // pending grants belonging to people who have nothing to do with this request. A
+        // deletion that widens itself by the shape of the address it was given is worse than
+        // the leak it was closing.
+        //
+        // Lower-casing one side is the whole of the case question, because only one side can be
+        // mixed: this column is written on exactly one path — Better Auth's `create-invitation`
+        // route lower-cases `email` before the adapter writes it, and
+        // `WorkspaceInvitationService.createInvitation` lower-cases it again before calling
+        // that route, which is the same assumption `findPendingInvitations` already reads by.
+        // `User.email` is whatever was registered, so it is the side that gets `toLowerCase()`.
+        result.invitationsReceivedDeleted = (
+          await tx.workspaceInvitation.deleteMany({
+            where: { email: user.email.toLowerCase() },
+          })
+        ).count;
+
         result.commentsRedacted = await this.redactCommentMentions(tx, userId);
         result.activitiesRedacted = await this.redactActivityPayloads(tx, userId);
 
@@ -442,8 +488,18 @@ export class AccountDeletionService {
         // row that does not. Those are covered by their own expiry, which ADR 0020's nightly
         // sweep already enforces — a `reset-password` token outlives its user by at most an
         // hour and carries no address to disclose in the meantime.
+        //
+        // `escapeLikePattern` for the same reason the comment two blocks up rules out
+        // `mode: 'insensitive'` on the invitation delete: plain `contains` compiles to the same
+        // unescaped `LIKE` (empirically confirmed — see `escapeLikePattern`'s doc comment), and
+        // an email local-part is free to contain `_`, a legal RFC 5321 character. Unescaped,
+        // deleting `john_doe@example.com`'s verification rows would also delete
+        // `johnXdoe@example.com`'s — someone else's live token, caught by a pattern that was
+        // never supposed to be a pattern.
         result.verificationsDeleted = (
-          await tx.verification.deleteMany({ where: { identifier: { contains: user.email } } })
+          await tx.verification.deleteMany({
+            where: { identifier: { contains: escapeLikePattern(user.email) } },
+          })
         ).count;
 
         result.membershipsRemoved = (
@@ -592,6 +648,10 @@ export class AccountDeletionService {
    * Paged by `id` rather than read whole: the count is bounded by how often one person was
    * mentioned, which is not bounded by anything in the schema. `contains` is a `LIKE '%…%'` and
    * therefore a scan — accepted, because this runs once per account, ever, off any hot path.
+   *
+   * `userId` is not run through `escapeLikePattern`, unlike the other `contains` calls this
+   * flow makes: it is a `uuid(7)` this service reads out of `User.id`, never text a person
+   * typed, and its alphabet (hex digits and hyphens) cannot contain `%` or `_` to begin with.
    */
   private async redactCommentMentions(
     tx: Prisma.TransactionClient,

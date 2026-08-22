@@ -226,6 +226,18 @@ describe('DeleteAccountDialog', () => {
       expect(await screen.findByText(copy.deleteErrorConfirm)).toBeTruthy();
     });
 
+    it('announces the failed deletion to assistive tech and moves focus to it', async () => {
+      apiDelete.mockRejectedValue(apiFailure(403));
+      renderDialog();
+
+      fireEvent.change(await confirmField(), { target: { value: EMAIL } });
+      fireEvent.click(deleteButton());
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe(copy.deleteErrorConfirm);
+      await waitFor(() => expect(document.activeElement).toBe(alert));
+    });
+
     it('refuses to offer the deletion at all when the preview could not load', async () => {
       apiGet.mockRejectedValue(apiFailure(500));
       renderDialog();

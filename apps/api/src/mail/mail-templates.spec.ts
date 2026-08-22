@@ -1,5 +1,11 @@
 import { SUPPORTED_LOCALES, type Locale } from '@kurul/shared-types';
-import { buildInvitationEmail, buildVerificationEmail } from './mail-templates';
+import {
+  buildAssignmentEmail,
+  buildDueSoonEmail,
+  buildInvitationEmail,
+  buildMentionEmail,
+  buildVerificationEmail,
+} from './mail-templates';
 
 describe('buildVerificationEmail', () => {
   const params = {
@@ -119,6 +125,106 @@ describe('buildInvitationEmail', () => {
   });
 });
 
+describe('notification emails', () => {
+  const params = {
+    to: 'member@example.test',
+    actorName: 'Ada Lovelace',
+    taskTitle: 'Ship the release',
+    workspaceName: 'Analytical Engine',
+    taskUrl: 'http://localhost:3000/board/b1/task/0199f0d2-0000-7000-8000-000000000001',
+    locale: 'en' as Locale,
+  };
+
+  describe('buildAssignmentEmail', () => {
+    it('names the actor, the card and the workspace, and links to the card', () => {
+      const message = buildAssignmentEmail(params);
+
+      expect(message.to).toBe('member@example.test');
+      expect(message.subject).toContain('Ship the release');
+      expect(message.text).toContain('Ada Lovelace');
+      expect(message.text).toContain('Analytical Engine');
+      expect(message.text).toContain(params.taskUrl);
+      expect(message.html).toContain(`href="${params.taskUrl}"`);
+    });
+
+    it('says where the email can be switched off', () => {
+      const message = buildAssignmentEmail(params);
+
+      expect(message.text).toContain('turn it off');
+    });
+
+    it('drops the actor cleanly when the display name is blank', () => {
+      const message = buildAssignmentEmail({ ...params, actorName: '  ' });
+
+      expect(message.text.startsWith('You were assigned')).toBe(true);
+    });
+
+    it('writes the whole email in Turkish', () => {
+      const message = buildAssignmentEmail({ ...params, locale: 'tr' });
+
+      expect(message.subject).toContain('atandınız');
+      expect(message.text).toContain('Ada Lovelace');
+      expect(message.text).toContain(params.taskUrl);
+      expect(message.text).toContain('kapatabilirsiniz');
+      expect(message.text).not.toContain('assigned you');
+    });
+  });
+
+  describe('buildMentionEmail', () => {
+    it('names the actor and the card, and links to the card', () => {
+      const message = buildMentionEmail(params);
+
+      expect(message.subject).toContain('mentioned');
+      expect(message.text).toContain('Ada Lovelace');
+      expect(message.text).toContain('Ship the release');
+      expect(message.text).toContain(params.taskUrl);
+    });
+
+    it('writes the whole email in Turkish', () => {
+      const message = buildMentionEmail({ ...params, locale: 'tr' });
+
+      expect(message.subject).toContain('bahsedildi');
+      expect(message.text).not.toContain('mentioned you');
+    });
+  });
+
+  describe('buildDueSoonEmail', () => {
+    const dueSoon = {
+      to: params.to,
+      taskTitle: params.taskTitle,
+      workspaceName: params.workspaceName,
+      dueDate: new Date('2026-09-01T00:00:00.000Z'),
+      taskUrl: params.taskUrl,
+      locale: 'en' as Locale,
+    };
+
+    it("names the card and spells the due day in the recipient's language", () => {
+      const message = buildDueSoonEmail(dueSoon);
+
+      expect(message.subject).toContain('due soon');
+      expect(message.text).toContain('September 1, 2026');
+      expect(message.text).toContain(params.taskUrl);
+    });
+
+    it('formats the day for a Turkish recipient', () => {
+      const message = buildDueSoonEmail({ ...dueSoon, locale: 'tr' });
+
+      expect(message.subject).toContain('yaklaşıyor');
+      expect(message.text).toContain('1 Eylül 2026');
+    });
+
+    it('reads the day in UTC, which is how the web shows it', () => {
+      // 23:30 UTC on the 1st is the 2nd in half the world; the email and the card must agree.
+      const message = buildDueSoonEmail({
+        ...dueSoon,
+        dueDate: new Date('2026-09-01T23:30:00.000Z'),
+      });
+
+      expect(message.text).toContain('September 1, 2026');
+    });
+  });
+});
+
 describe('every supported locale', () => {
   const invitation = {
     to: 'invitee@example.test',
@@ -175,6 +281,41 @@ describe('every supported locale', () => {
       for (const line of message.text.split('\n')) {
         expect(line).not.toMatch(/^\s+$/);
       }
+    });
+
+    it('keeps a header-splitting card title out of every notification subject', () => {
+      const notification = {
+        to: 'member@example.test',
+        actorName: 'Ada',
+        taskTitle: 'Card\r\nBcc: attacker@example.test',
+        workspaceName: 'Analytical Engine',
+        taskUrl: 'http://localhost:3000/board/b1/task/t1',
+        locale,
+      };
+
+      expect(buildAssignmentEmail(notification).subject).not.toMatch(/[\r\n]/);
+      expect(buildMentionEmail(notification).subject).not.toMatch(/[\r\n]/);
+      expect(
+        buildDueSoonEmail({ ...notification, dueDate: new Date('2026-09-01T00:00:00Z') }).subject,
+      ).not.toMatch(/[\r\n]/);
+    });
+
+    it('escapes a markup-carrying card title in every notification email', () => {
+      const notification = {
+        to: 'member@example.test',
+        actorName: '<b>Ada</b>',
+        taskTitle: '<img src=x onerror="alert(1)">',
+        workspaceName: 'Analytical Engine',
+        taskUrl: 'http://localhost:3000/board/b1/task/t1',
+        locale,
+      };
+
+      expect(buildAssignmentEmail(notification).html).not.toContain('<img');
+      expect(buildAssignmentEmail(notification).html).not.toContain('<b>');
+      expect(buildMentionEmail(notification).html).not.toContain('<img');
+      expect(
+        buildDueSoonEmail({ ...notification, dueDate: new Date('2026-09-01T00:00:00Z') }).html,
+      ).not.toContain('<img');
     });
   });
 });

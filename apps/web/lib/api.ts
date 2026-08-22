@@ -75,6 +75,15 @@ export interface ApiMessageKeys {
   fallback: string;
   /** HTTP status → translation key, e.g. `{ 403: 'forbidden' }`. */
   byStatus?: Readonly<Partial<Record<number, string>>>;
+  /**
+   * Envelope `error` string → translation key, checked before `byStatus`.
+   *
+   * For the failures a status alone cannot name: the upload endpoint answers 413 for both the
+   * per-file size limit and a storage quota (ADR 0027), and `error` is the field
+   * `docs/api-conventions.md#errors` tells clients to branch on. Keys here should come from
+   * `@kurul/shared-types` constants, never be retyped strings.
+   */
+  byError?: Readonly<Partial<Record<string, string>>>;
 }
 
 /**
@@ -94,7 +103,11 @@ export function resolveApiMessage(
   keys: ApiMessageKeys,
 ): string {
   const status = apiStatus(caught);
-  const key = (status === null ? undefined : keys.byStatus?.[status]) ?? keys.fallback;
+  const code = caught instanceof ApiError ? caught.body.error : null;
+  const key =
+    (code === null ? undefined : keys.byError?.[code]) ??
+    (status === null ? undefined : keys.byStatus?.[status]) ??
+    keys.fallback;
   return t(key);
 }
 

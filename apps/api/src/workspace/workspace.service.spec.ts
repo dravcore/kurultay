@@ -251,7 +251,7 @@ describe('WorkspaceService.create', () => {
    * The one window ADR 0026 leaves open, closed at the one place it matters.
    *
    * An account deleted by an instance administrator keeps a working session cookie for up to
-   * five minutes, because Better Auth's `session.cookieCache` answers without a database read.
+   * 60 seconds, because Better Auth's `session.cookieCache` answers without a database read.
    * Every workspace-scoped route already answers `404` in that window — the memberships are
    * gone — and this is the write that would hand the tombstone a fresh one, as the sole OWNER
    * of a live tenant.

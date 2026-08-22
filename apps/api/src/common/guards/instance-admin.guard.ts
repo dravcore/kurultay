@@ -75,7 +75,15 @@ export class InstanceAdminGuard implements CanActivate {
     // reached here without a session would be one someone had marked `@Public()`, and
     // answering 403 rather than reading `undefined` keeps that mistake closed.
     const request = context.switchToHttp().getRequest<AuthedRequest>();
-    if (!isInstanceAdmin(request.user?.email)) {
+    const user = request.user;
+
+    // `emailVerified` is required, not merely preferred: `requireEmailVerification: false`
+    // means a session exists before mailbox ownership is proven, and a deleted account's
+    // address is freed for a fresh sign-up (see `anonymised-user.ts`). Without this check,
+    // registering a listed-but-unregistered or freed admin address — during the setup window
+    // or after an admin account is deleted — would grant instance administration to whoever
+    // types it into the sign-up form, without ever receiving mail at it.
+    if (!isInstanceAdmin(user?.email) || !user?.emailVerified) {
       throw new ForbiddenException('Instance administration is restricted');
     }
 

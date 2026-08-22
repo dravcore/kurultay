@@ -17,3 +17,8 @@ e2e/blob-report
 # and would fail on it. Every other fixture in that directory is formatted normally; this is the
 # one file whose brokenness is the point.
 apps/api/test/fixtures/trello/edge-truncated.json
+# Anonymised real Trello exports are the byte-for-byte output of
+# scripts/anonymise-trello-export.mjs. Reformatting them would make the committed file differ
+# from the one the script wrote, and the whole point of the directory is that nothing in it was
+# touched by hand.
+apps/api/test/fixtures/trello/real/*.json

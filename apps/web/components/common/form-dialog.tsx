@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { SubmitError } from '@/components/common/submit-error';
 
 export interface FormDialogProps {
   open: boolean;
@@ -110,7 +111,7 @@ function FormDialogBody({
       </DialogHeader>
       <form className="flex flex-col gap-3" onSubmit={(event) => void submit(event)}>
         {children}
-        {error ? <p className="text-body text-destructive">{error}</p> : null}
+        {error ? <SubmitError message={error} /> : null}
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
             {cancelLabel}

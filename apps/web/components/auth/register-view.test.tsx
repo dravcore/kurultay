@@ -87,6 +87,18 @@ describe('RegisterView', () => {
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 
+  it('announces an unmapped sign-up failure to assistive tech and moves focus to it', async () => {
+    mocks.signUpEmail.mockResolvedValue({ error: { message: 'Email already taken' } });
+    renderView();
+    fillForm();
+
+    submit();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(messages.auth.register.error);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
   it('sends an invitee back to the invitation instead of asking for a new workspace', async () => {
     mocks.searchParams = new URLSearchParams('next=%2Finvite%2Fabc');
     renderView();

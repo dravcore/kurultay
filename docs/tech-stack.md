@@ -77,7 +77,7 @@ Multi-tenant workspaces are the heart of this product, so auth is a load-bearing
 
 ### Email — nodemailer over SMTP
 
-Kurul sends one class of transactional email so far: the verification link an invitee needs before `better-auth`'s hardened invitation-acceptance check will let them join a workspace (see [`decisions/0013-invitation-email-verification.md`](decisions/0013-invitation-email-verification.md)). `nodemailer` talks plain SMTP, configured only through `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_SECURE` / `MAIL_FROM` — no provider SDK, so self-hosters point it at whatever mail server they already run instead of creating a new vendor account. `docker-compose.dev.yml` runs [Mailpit](https://mailpit.axllent.org/) as a local SMTP catch-all so development never sends real mail; see [development.md#smtp-and-mailpit](development.md#smtp-and-mailpit).
+Kurul sends two classes of email: transactional (the verification link an invitee needs before `better-auth`'s hardened invitation-acceptance check will let them join a workspace, see [`decisions/0013-invitation-email-verification.md`](decisions/0013-invitation-email-verification.md), and the invitation itself) and notification (assignment, mention and due-soon, one message per `Notification` row, behind a per-user switch on `/me`). Both go through the same module and the same variables. `nodemailer` talks plain SMTP, configured only through `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_SECURE` / `MAIL_FROM` — no provider SDK, so self-hosters point it at whatever mail server they already run instead of creating a new vendor account. `docker-compose.dev.yml` runs [Mailpit](https://mailpit.axllent.org/) as a local SMTP catch-all so development never sends real mail; see [development.md#smtp-and-mailpit](development.md#smtp-and-mailpit).
 
 ### Frontend — Next.js 16
 
@@ -89,7 +89,7 @@ Kurul sends one class of transactional email so far: the verification link an in
 `messages/<locale>.json` rather than being hardcoded. Locale resolution is
 `User.locale → locale cookie → Accept-Language → 'en'` ([ADR 0018](decisions/0018-localization-strategy.md));
 **Settings → Language** can set a preference or “Match my browser”. English is still the only
-catalog on offer — additional UI language packs remain [Beyond MVP](roadmap.md#beyond-mvp).
+catalog on offer — additional UI language packs remain [Beyond MVP](../ROADMAP.md#beyond-mvp).
 
 ### File uploads — `multer` + `file-type`
 
@@ -130,7 +130,7 @@ Projects worth studying for architecture and data modelling:
 
 ## 5. Decision records
 
-Stack and product ADRs are indexed in [decisions/README.md](decisions/README.md) (0001–0019).
+Stack and product ADRs are indexed in [decisions/README.md](decisions/README.md) (0001-0028).
 Start there rather than duplicating the table here.
 
-Related: [architecture.md](architecture.md) · [archive/project-skeleton.md](archive/project-skeleton.md) (historical Phase 1 scaffold)
+Related: [architecture.md](architecture.md)

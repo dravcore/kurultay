@@ -1,4 +1,4 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import { createTempStorageDir, removeTempStorageDir } from '../../test/helpers/storage';
 import { closeStorageBackend } from './storage';
 import { StorageService } from './storage.service';
@@ -71,6 +71,54 @@ describe('StorageService', () => {
 
     await service.remove('01/98/k');
     await expect(service.createReadStream('01/98/k')).rejects.toThrow();
+  });
+
+  describe('the boot log line', () => {
+    const quotaVars = ['ATTACHMENT_WORKSPACE_QUOTA_BYTES', 'ATTACHMENT_INSTANCE_QUOTA_BYTES'];
+    const saved = new Map(quotaVars.map((name) => [name, process.env[name]]));
+
+    afterEach(() => {
+      for (const [name, value] of saved) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      jest.restoreAllMocks();
+    });
+
+    it('says which ceilings apply and which of them are defaults, once attachments are on', async () => {
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const service = await enable();
+
+      service.onModuleInit();
+
+      expect(log).toHaveBeenCalledWith(
+        expect.stringMatching(/^Attachment ceilings: workspaceQuotaBytes=2147483648 \(default\)/),
+      );
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('warns about a workspace quota above the instance quota instead of refusing to boot', async () => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      process.env.ATTACHMENT_WORKSPACE_QUOTA_BYTES = '2048';
+      process.env.ATTACHMENT_INSTANCE_QUOTA_BYTES = '1024';
+      const service = await enable();
+
+      service.onModuleInit();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('is larger than'));
+      expect(service.workspaceQuotaBytes).toBe(2048);
+    });
+
+    it('stays silent when attachments are off, because nothing is there to cap', () => {
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const service = new StorageService();
+
+      service.onModuleInit();
+
+      expect(log).not.toHaveBeenCalled();
+    });
   });
 
   it('closes the backend when the module is destroyed', async () => {

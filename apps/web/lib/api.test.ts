@@ -50,6 +50,34 @@ describe('resolveApiMessage', () => {
   it('works without any status mapping', () => {
     expect(resolveApiMessage(apiError(403), t, { fallback: 'createError' })).toBe('t:createError');
   });
+
+  it('prefers the key mapped to the envelope error over the one mapped to the status', () => {
+    // The case this exists for: the upload endpoint answers 413 for the per-file size limit
+    // *and* for a storage quota (ADR 0027), so the status alone would always show the size
+    // message. `error` is the field api-conventions tells clients to branch on.
+    const quota = new ApiError({
+      statusCode: 413,
+      error: 'Attachment Quota Exceeded',
+      message: 'boom',
+    });
+    expect(
+      resolveApiMessage(quota, t, {
+        fallback: 'saveError',
+        byError: { 'Attachment Quota Exceeded': 'quotaExceeded' },
+        byStatus: { 413: 'tooLarge' },
+      }),
+    ).toBe('t:quotaExceeded');
+  });
+
+  it('falls through to the status for an unmapped error string', () => {
+    expect(
+      resolveApiMessage(apiError(413), t, {
+        fallback: 'saveError',
+        byError: { 'Attachment Quota Exceeded': 'quotaExceeded' },
+        byStatus: { 413: 'tooLarge' },
+      }),
+    ).toBe('t:tooLarge');
+  });
 });
 
 function jsonResponse(body: unknown): Response {

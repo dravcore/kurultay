@@ -18,10 +18,5 @@ Fixes #
 - [ ] Title follows Conventional Commits (`feat:`, `fix:`, `docs:`, ...)
 - [ ] Relevant docs updated (`docs/`, README, etc.)
 - [ ] Lint / typecheck / tests pass (CI green)
-- [ ] I understand that Kurul does not merge outside code, documentation, or translation
-      pull requests — only typo / dead-link one-liners
-      ([CONTRIBUTING.md](https://github.com/dravcore/kurul/blob/develop/CONTRIBUTING.md#code-contributions-are-paused),
-      [ADR 0015](https://github.com/dravcore/kurul/blob/develop/docs/decisions/0015-no-external-contributions.md)).
-      There is nothing to sign: the
-      [CLA](https://github.com/dravcore/kurul/blob/develop/docs/cla.md) is an unenacted draft
-      and its check is disabled. _(Maintainers can leave this unchecked.)_
+- [ ] I read [CONTRIBUTING.md](https://github.com/dravcore/kurul/blob/develop/CONTRIBUTING.md)
+      and this change was discussed in an issue first (or is trivial)

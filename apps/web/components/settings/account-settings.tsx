@@ -21,7 +21,7 @@ const ROW = 'flex min-h-9 items-center justify-between gap-3 py-1.5';
  *
  * The address is read from `/me` rather than from the session, for the same reason
  * `LanguageSettings` reads it from there: Better Auth caches the session user in a cookie for
- * five minutes, and the address is what the confirmation gate compares against — a stale one
+ * 60 seconds, and the address is what the confirmation gate compares against — a stale one
  * would produce a refusal nobody could explain.
  */
 export function AccountSettings(): React.ReactElement {

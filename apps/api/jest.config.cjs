@@ -13,6 +13,25 @@ module.exports = {
   // match `testRegex` below: it requires a literal `.spec.ts`, not `.e2e-spec.ts`).
   roots: ['<rootDir>', '<rootDir>/../test/helpers'],
   testRegex: '.*\\.spec\\.ts$',
+  // The two workspace packages resolve through their `package.json` `exports` to `dist/`,
+  // which is git-ignored and only exists after a build. Tests must never depend on that: a
+  // fresh checkout has no `dist`, and a stale one is worse, because it silently runs last
+  // week's enums against this week's service. Both specifiers are pointed at the packages'
+  // `src/index.ts` instead, so Jest compiles the same source `pnpm typecheck` reads.
+  //
+  // Those sources are NodeNext-style and import each other with a `.js` suffix
+  // (`export * from './enums.js'`), which Jest's CommonJS resolver takes literally. The
+  // second entry strips the suffix from every relative specifier and lets Jest pick the
+  // extension from `moduleFileExtensions` instead. That is lossless for the files that were
+  // already `.js` (`src/generated/prisma/index.js` does `require('./runtime/client.js')`;
+  // `js` is first in the extension list, so the same file is found), and it is what makes
+  // `./enums.js` reach `enums.ts`. `src/workspace-packages.spec.ts` asserts both mappings hold.
+  // Keep in sync with `apps/api/test/jest-e2e.config.cjs`.
+  moduleNameMapper: {
+    '^@kurul/shared-types$': '<rootDir>/../../../packages/shared-types/src/index.ts',
+    '^@kurul/auth-access$': '<rootDir>/../../../packages/auth-access/src/index.ts',
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
   transform: {
     '^.+\\.(t|j|mj)sx?$': [
       require.resolve('ts-jest'),
@@ -28,6 +47,18 @@ module.exports = {
           // `pnpm typecheck` and `nest build`, which are unaffected by this override.
           module: 'CommonJS',
           moduleResolution: 'Node',
+          // `moduleNameMapper` above tells Jest's resolver where `@kurul/*` lives; this tells
+          // the TypeScript resolver the same thing, because ts-jest's type resolution follows
+          // tsconfig, not the mapper. Today it changes nothing observable: `tsconfig.base.json`
+          // sets `isolatedModules: true`, ts-jest 29 reads that as "transpile only", and a
+          // transpile never looks a module up. Forcing `isolatedModules: false` in this block
+          // with `dist` deleted is how the entry was proven: without it every spec importing a
+          // shared type fails on TS2307, with it they pass. `paths` is resolved against the
+          // directory of the tsconfig ts-jest finds (`apps/api`), so no `baseUrl` is needed.
+          paths: {
+            '@kurul/shared-types': ['../../packages/shared-types/src/index.ts'],
+            '@kurul/auth-access': ['../../packages/auth-access/src/index.ts'],
+          },
         },
       },
     ],

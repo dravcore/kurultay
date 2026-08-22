@@ -2,105 +2,51 @@
 
 How to propose, build, and submit changes.
 
-Kurul is AGPL-3.0 — see [LICENSE](LICENSE). Outside code, documentation, and translation
-pull requests are **not accepted**; the reasoning is immediately below. Everything else —
-bug reports, feature ideas, design feedback — is wanted as much as ever.
-
-## Code contributions are paused
-
-> **Pull requests from outside contributors are not merged — whether they change code, docs,
-> or translations.** This has no end date. Ideas, bug reports and discussion are wanted as much
-> as ever — see [Ways to contribute](#ways-to-contribute).
->
-> One exception: a typo or a dead link is still welcome as a one-line PR. A corrected spelling
-> is not an original work, so there is nothing to license and nothing to unpick later.
-
-Kurul is meant to fund itself by **dual licensing** — the same AGPL-3.0 codebase, also sold
-to organizations under a commercial license — and that only works if one person holds the right
-to license every line. A merged outside patch would sit in the codebase with its copyright
-unresolved unless its author had signed a
-[Contributor License Agreement](docs/cla.md) first. That agreement exists as a draft, but it is
-not in force and it is not being enacted: making it binding needs a lawyer's review that the
-maintainer is not commissioning for now. Collecting signatures against an unreviewed document
-would be worse than collecting none, because an invalid signature only reveals itself years
-later, at the most expensive possible moment.
-
-So the honest thing is to say no up front rather than accept a patch that could not be used.
-The pause is **indefinite**: the draft is kept ready and would be activated if legal review
-ever happens, but no such review is planned, and no date is being promised.
-[SQLite](https://www.sqlite.org/copyright.html) has run this way for decades for much the same
-reason. This is a choice, not a hardship — single authorship keeps every option open, and the
-full reasoning, including what it costs, is in
-[ADR 0015](docs/decisions/0015-no-external-contributions.md).
-
-**Please do not paste code into issues or comments.** Describe the change, point at the file
-and line, explain the approach — all of that is welcome and useful. But a diff or a snippet is
-your copyrighted work, and if it is sitting in the thread the maintainer cannot safely read it
-and then write the fix. Keeping code out of the discussion keeps that path clear.
+Kurul is AGPL-3.0 (see [LICENSE](LICENSE)) and it is open to contributions: code, documentation
+and translations are all welcome, as are bug reports, feature ideas and design feedback. The
+project refused outside pull requests until 2026-08-21; that was reversed in
+[ADR 0028](docs/decisions/0028-open-contributions-hosted-service.md), which records the history
+and the reasoning.
 
 ## Code of conduct
 
 Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Read it before
 opening an issue or PR.
 
-## Contributor License Agreement
+## License of contributions
 
-> **Not in force, and nobody is being asked to sign anything.** [docs/cla.md](docs/cla.md) is
-> an unreviewed draft, the `CLA` workflow is
-> [disabled](.github/workflows/cla.yml) — no bot will comment on your pull request — and no
-> legal review is scheduled ([ADR 0015](docs/decisions/0015-no-external-contributions.md)).
-> Since outside code is not merged at all, there is nothing to sign and no signature would be
-> collected even if you offered one. **This section describes how the agreement would work if
-> it were ever activated. None of it is happening today.**
+**Inbound equals outbound.** By opening a pull request you license your contribution under
+AGPL-3.0: the terms the rest of the codebase already carries, and the same terms every user
+already has. Nothing broader is asked of you.
 
-**Why it exists.** Kurul is AGPL-3.0 and stays that way — one codebase, nothing withheld
-from the community. The project is meant to fund itself through **dual licensing**: the
-maintainer also sells organizations a commercial license to the same code, exempting them from
-AGPL's obligations. Selling that exemption requires the right to distribute _all_ of the code
-under a license other than AGPL-3.0, including the parts you wrote. By default you own the
-copyright in your patch and nobody may relicense it, so the CLA is where you grant that
-permission explicitly.
+**You keep your copyright.** The project takes no ownership of your work and cannot relicense
+it. It stays yours; what you grant is the project's own license, nothing more.
 
-Put plainly, without hedging: **you are granting the maintainer the right to also sell your
-contribution under a commercial license.** In return, the agreement guarantees your
-contribution keeps being published under AGPL-3.0, and you keep the copyright and every right
-to reuse, relicense, or republish your own code exactly as if you had never signed. The full
-reasoning, including the parts that are a cost to you, is in
-[ADR 0014](docs/decisions/0014-dual-licensing-cla.md).
+**There is no CLA and no DCO.** Nothing to sign, no bot commenting on your pull request, no
+employer approval form. A `Signed-off-by` requirement may be adopted later if the project grows
+into needing one; it would be written into this file before it applied to anyone, and it would
+never reach back to work already merged.
 
-**How signing would work.** Inside the pull request — no email, no PDF. A bot would comment with
-a link to [docs/cla.md](docs/cla.md); you would read it and post a new comment containing
-exactly the sentence it quotes, turning the **CLA** check green and covering every future PR
-from the same GitHub account. That workflow is written and pinned in
-[`.github/workflows/cla.yml`](.github/workflows/cla.yml), but it is switched off, so today it
-comments on nothing and no check appears on your PR.
-
-**Nothing depends on signing today.** Issues, reviews, and discussion are unaffected, and a
-well-reported bug is valuable with no code attached. If you have a fix in mind, say so on the
-issue — describe it rather than attaching a patch, and the maintainer can write it
-independently.
-
-**Contributing for an employer.** If the agreement were ever activated and you were
-contributing as part of your job, your employer may own the copyright and you would need their
-approval before signing. There is no Entity CLA, so a company has no path here at all. See
-[docs/cla.md](docs/cla.md#corporate-and-entity-contributions).
+**What you confirm by opening a PR** is that you have the right to submit the work: you wrote
+it, or whoever owns it (an employer, an upstream project) allows you to contribute it under
+AGPL-3.0. If you are working on company time or company equipment and are not certain, say so
+on the pull request before it is reviewed.
 
 ## Ways to contribute
 
-| Type             | Status | How                                                                        |
-| ---------------- | ------ | -------------------------------------------------------------------------- |
-| Bug report       | Open   | [Open a bug report issue](.github/ISSUE_TEMPLATE/bug_report.yml)           |
-| Feature idea     | Open   | [Open a feature request issue](.github/ISSUE_TEMPLATE/feature_request.yml) |
-| Design feedback  | Open   | Comment on an issue, or open a discussion                                  |
-| Typo / dead link | Open   | A one-line PR is fine                                                      |
-| Code             | Paused | See [Code contributions are paused](#code-contributions-are-paused)        |
-| Docs             | Paused | Same reason — a written page is a copyrighted work                         |
-| Translation      | Paused | Same reason — a translation is a derivative work                           |
+| Type             | How                                                                        |
+| ---------------- | -------------------------------------------------------------------------- |
+| Bug report       | [Open a bug report issue](.github/ISSUE_TEMPLATE/bug_report.yml)           |
+| Feature idea     | [Open a feature request issue](.github/ISSUE_TEMPLATE/feature_request.yml) |
+| Design feedback  | Comment on an issue, or open a discussion                                  |
+| Code             | Find or open an issue first, then a PR against `develop`                   |
+| Docs             | Same, and update the `docs/tr/` mirror in the same PR                      |
+| Translation      | Same; the locale catalogs stay key-for-key with English                    |
+| Typo / dead link | A one-line PR is fine, no issue needed                                     |
 
-A feature idea, a bug report, or "this flow feels wrong and here is why" carries no copyright:
-they are facts and ideas, and they are genuinely the most useful thing anyone can send right
-now. What carries copyright is the written expression — a patch, a page of prose, a
-translation — and that is what the pause is about.
+English is canonical. A PR that changes a file under `docs/` updates its Turkish mirror under
+`docs/tr/` in the same PR, and a change to `README.md` updates `README.tr.md`. If you can write
+only one of the two, say so on the issue rather than leaving the mirror to drift silently.
 
 ## Issue-first rule
 
@@ -141,6 +87,8 @@ Test expectations: [docs/testing.md](docs/testing.md).
 - Link the issue the PR addresses.
 - Fill in the PR template checklist (conventional title, docs updated where relevant,
   lint/typecheck/tests — CI must be green).
+- CI on a pull request from a fork runs without repository secrets, so a job that needs one
+  runs after merge instead. If a check is skipped on your PR, that is why.
 - Expect **one approving review** before merge. Prefer a merge commit into `develop`
   (`--no-ff`) so multi-commit history stays readable; squash into `develop` is allowed for
   Dependabot / single-commit noise. Squash into `main` is never allowed — see

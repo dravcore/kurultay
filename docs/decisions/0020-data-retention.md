@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-08-14
+**Updated:** 2026-08-18 — `WorkspaceInvitation` joins the sweep as an additional window on top of the original four below, `INVITATION_RETENTION_DAYS` (default 90 days from `createdAt`, finished rows only): the table list below omitted the one address in the schema that need not belong to a user (audit finding DB-01).
+**Updated:** 2026-08-18 — the Consequences section's "no index was added for the sweep's own predicates" no longer holds for two of the four tables below: migration `20260814180000_retention_sweep_indexes` adds `Session_expiresAt_idx` and `Verification_expiresAt_idx`, after measuring the sweep at production-like volume found each on a sequential scan of the whole table (issue #187). The same migration also adds `UsagePing_createdAt_idx`, but `UsagePing` is not one of the four tables this ADR lists; it is the telemetry-ping table the sweep also covers, added by [ADR 0021](0021-activation-funnel-and-opt-in-telemetry.md). `Activity.createdAt` and `Notification.readAt` are deliberately left alone — both already reach an index through a different leading column despite this ADR's prediction otherwise, so the trade-off below still holds for those two. This is the ADR's own "revisit only if a sweep is observed to outlast its window" clause working as designed: the decision was revisited on measurement, not assumption, and only where measurement asked for it.
 
 > 🌐 English (canonical) | [Türkçe](../tr/decisions/0020-data-retention.md)
 

@@ -273,6 +273,26 @@ describe('useTaskAttachments', () => {
     }
   });
 
+  it('tells a full quota apart from a too-large file, though both are 413', async () => {
+    // A smaller file cannot fix a full workspace, so showing `tooLarge` here would send the
+    // user off to shrink a file that was never the problem. The discriminator is the
+    // envelope's `error` string (ADR 0027), which the loop above deliberately does not carry.
+    const { result } = renderAttachments(task());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    route('POST', '/attachments', () =>
+      json({ statusCode: 413, error: 'Attachment Quota Exceeded', message: 'quota' }, 413),
+    );
+
+    await act(async () => {
+      expect(await result.current.upload(new File(['x'], 'f.pdf'))).toBe(false);
+    });
+
+    expect(toastError).toHaveBeenCalledWith(
+      "There isn't enough attachment storage left for that file.",
+    );
+  });
+
   it('refuses every write for a viewer without reaching the network', async () => {
     const { result } = renderAttachments(task(), false);
     await waitFor(() => expect(result.current.loading).toBe(false));

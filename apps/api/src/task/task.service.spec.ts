@@ -7,6 +7,7 @@ import {
 import { ActivityType, SocketEvents } from '@kurul/shared-types';
 import { ActivityService } from '../activity/activity.service';
 import { MIN_GAP } from '../common/position/fractional-index';
+import { NotificationMailer } from '../notification/notification-mailer';
 import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaskAssigneeService } from './task-assignee.service';
@@ -126,12 +127,14 @@ describe('TaskService', () => {
     const notifications = notificationService as unknown as NotificationService;
     const taskRead = new TaskReadService(prismaService);
     const taskEvents = new TaskEventsService(taskRead, realtime);
+    const notificationMailer = { sendForCreated: jest.fn().mockResolvedValue(undefined) };
     const assignees = new TaskAssigneeService(
       prismaService,
       activity,
       notifications,
       taskRead,
       taskEvents,
+      notificationMailer as unknown as NotificationMailer,
     );
     const labels = new TaskLabelService(prismaService, taskRead, taskEvents);
     return {
@@ -139,6 +142,7 @@ describe('TaskService', () => {
       prisma,
       activityService,
       notificationService,
+      notificationMailer,
       realtime,
       realtimeMock,
     };
@@ -652,6 +656,38 @@ describe('TaskService', () => {
       service.addAssignee(WORKSPACE_ID, 't1', ACTOR_ID, { userId: USER_ID }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(prisma.taskAssignee.create).not.toHaveBeenCalled();
+  });
+
+  it('emails the new assignee once their notification row is stored', async () => {
+    const { service, prisma, notificationService, notificationMailer } = buildService();
+    prisma.task.findFirst.mockResolvedValue(taskRow({ id: 't1' }));
+    prisma.workspaceMember.findFirst.mockResolvedValue({ id: 'm1' });
+    prisma.taskAssignee.create.mockResolvedValue({ taskId: 't1', userId: USER_ID });
+    notificationService.createAssignment.mockResolvedValue({ id: 'n1' });
+
+    await service.addAssignee(WORKSPACE_ID, 't1', ACTOR_ID, { userId: USER_ID });
+
+    expect(notificationMailer.sendForCreated).toHaveBeenCalledWith([
+      {
+        workspaceId: WORKSPACE_ID,
+        userId: USER_ID,
+        actorId: ACTOR_ID,
+        type: 'assignment',
+        taskId: 't1',
+      },
+    ]);
+  });
+
+  it('sends no email when the actor assigned themselves, because no row was stored', async () => {
+    const { service, prisma, notificationService, notificationMailer } = buildService();
+    prisma.task.findFirst.mockResolvedValue(taskRow({ id: 't1' }));
+    prisma.workspaceMember.findFirst.mockResolvedValue({ id: 'm1' });
+    prisma.taskAssignee.create.mockResolvedValue({ taskId: 't1', userId: ACTOR_ID });
+    notificationService.createAssignment.mockResolvedValue(null);
+
+    await service.addAssignee(WORKSPACE_ID, 't1', ACTOR_ID, { userId: ACTOR_ID });
+
+    expect(notificationMailer.sendForCreated).not.toHaveBeenCalled();
   });
 
   it('maps a duplicate assignee to 409', async () => {

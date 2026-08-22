@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { ActivityType } from '@kurul/shared-types';
+import { ActivityType, NotificationType } from '@kurul/shared-types';
 import type { TaskDto } from '@kurul/shared-types';
 import { ActivityService } from '../activity/activity.service';
+import { NotificationMailer } from '../notification/notification-mailer';
 import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AddAssigneeDto } from './dto/add-assignee.dto';
@@ -17,6 +18,7 @@ export class TaskAssigneeService {
     private readonly notificationService: NotificationService,
     private readonly taskRead: TaskReadService,
     private readonly taskEvents: TaskEventsService,
+    private readonly notificationMailer: NotificationMailer,
   ) {}
 
   async addAssignee(
@@ -72,6 +74,17 @@ export class TaskAssigneeService {
 
     if (notifiedUserId) {
       this.notificationService.emitUnreadChanged(workspaceId, [notifiedUserId]);
+      // Awaited, like the invitation email: it never rejects, and the response goes out once
+      // the relay has taken the message rather than racing it.
+      await this.notificationMailer.sendForCreated([
+        {
+          workspaceId,
+          userId: notifiedUserId,
+          actorId,
+          type: NotificationType.Assignment,
+          taskId: task.id,
+        },
+      ]);
     }
 
     return this.taskEvents.emitUpdated(workspaceId, taskId, actorId);

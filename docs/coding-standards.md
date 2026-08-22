@@ -324,5 +324,5 @@ pnpm typecheck     # shared package builds + tsc --noEmit
 - [api-conventions.md](api-conventions.md) — REST, DTO naming, error format
 - [testing.md](testing.md) — test placement and expectations
 - [git-strategy.md](git-strategy.md) — commits and PR process
-- [project-skeleton.md](project-skeleton.md) — directory layout these rules assume
+- [architecture.md](architecture.md#2-monorepo-layout) — directory layout these rules assume
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) — contribution process

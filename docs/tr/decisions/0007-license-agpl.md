@@ -5,7 +5,7 @@
 
 > 🌐 [English (canonical)](../../decisions/0007-license-agpl.md) | Türkçe — Bu çeviri güncel olmayabilir; kanonik kaynak İngilizce'dir.
 
-> **Devamı:** aşağıda açık bırakılan ticari model [0014](0014-dual-licensing-cla.md)'te karara bağlandı — open-core yerine çift lisanslama, artı bir CLA. 0014 bu kaydı tamamlıyor, yerini almıyor.
+> **Devamı:** aşağıda açık bırakılan ticari model [0028](0028-open-contributions-hosted-service.md)'de karara bağlandı: AGPL-3.0 kalıyor, iş modeli ise çift lisanslama değil (onu 0014 önermişti, 0028 terk etti), Dravcore'un işlettiği isteğe bağlı bir barındırma servisi. 0028 bu kaydı tamamlıyor, yerini almıyor.
 
 ## Bağlam
 

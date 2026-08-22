@@ -21,7 +21,7 @@ otomatik olarak uygulanırdı — ancak `apps/api/src/auth/auth.ts`,
 geçer ve açığı açık tutar.
 
 Bu override bir gözden kaçırma değildi. Yazıldığı sırada `sendInvitationEmail` bir no-op'tu
-(e-posta gönderimi MVP ötesine ertelenmişti — bkz. [roadmap.md](../roadmap.md)) ve
+(e-posta gönderimi MVP ötesine ertelenmişti — bkz. [ROADMAP.md](../../../ROADMAP.md)) ve
 `emailAndPassword.requireEmailVerification` zaten `false`'tu, dolayısıyla hiçbir kullanıcı
 doğrulanmış bir duruma ulaşamıyordu; davet kontrolünü olduğu gibi açmak her daveti güvensiz
 olmaktan çıkarıp kalıcı olarak kabul edilemez hale getirirdi. better-auth bağımlılığını tek
@@ -74,7 +74,7 @@ doğrulanmış bir e-posta adresi gerektirir.
   haline geliyor; bozuk bir SMTP yapılandırması "API çalışmıyor" yerine "davetler başarısız
   oluyor"a düşer — başlangıçta ona dokunan tek kod yolları davet gönderme ve davet kabuldür.
 - Gelecekteki bildirim e-postaları (mention'lar, due-soon hatırlatmaları — bkz.
-  [roadmap.md — MVP ötesi](../roadmap.md#mvp-ötesi)) aynı modülü ve aynı ortam değişkenlerini
+  [ROADMAP.md — MVP ötesi](../../../ROADMAP.md#beyond-mvp)) aynı modülü ve aynı ortam değişkenlerini
   yeniden kullanabilir, ileride ikinci bir mail yolu eklemek yerine.
 
 ## Değerlendirilen Alternatifler

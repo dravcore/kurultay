@@ -1,10 +1,11 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ActivityType, MemberRole, SocketEvents } from '@kurul/shared-types';
+import { ActivityType, MemberRole, NotificationType, SocketEvents } from '@kurul/shared-types';
 import type { CommentDto, CursorPage } from '@kurul/shared-types';
 import { ActivityService } from '../activity/activity.service';
 import { AUTHOR_SELECT, toAuthorDto, type AuthorRow } from '../common/author';
 import { parseMentions } from '../common/mentions/parse-mentions';
 import { toCursorPage } from '../common/pagination/cursor-page';
+import { NotificationMailer } from '../notification/notification-mailer';
 import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -31,6 +32,7 @@ export class CommentService {
     private readonly activityService: ActivityService,
     private readonly notificationService: NotificationService,
     private readonly realtime: RealtimeService,
+    private readonly notificationMailer: NotificationMailer,
   ) {}
 
   private toDto(row: CommentRow): CommentDto {
@@ -130,9 +132,18 @@ export class CommentService {
       return this.toDto(created);
     });
 
-    // One signal per mentioned user, however many rows the batch inserted.
+    // One signal per mentioned user, however many rows the batch inserted, and one email each.
     if (mentionRecipients.length > 0) {
       this.notificationService.emitUnreadChanged(workspaceId, mentionRecipients);
+      await this.notificationMailer.sendForCreated(
+        mentionRecipients.map((recipientId) => ({
+          workspaceId,
+          userId: recipientId,
+          actorId: userId,
+          type: NotificationType.Mention,
+          taskId,
+        })),
+      );
     }
 
     this.realtime.emitToBoard(task.boardId, SocketEvents.COMMENT_ADDED, {

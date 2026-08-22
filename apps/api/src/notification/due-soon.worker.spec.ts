@@ -7,7 +7,17 @@ import { initSentry, resetSentryForTesting } from '../common/observability/sentr
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { DueSoonWorker } from './due-soon.worker';
+import { NotificationMailer } from './notification-mailer';
 import { NotificationService } from './notification.service';
+
+/** The mailer is covered in `notification-mailer.spec.ts`; here it only has to be called. */
+function mailerStub() {
+  return { sendForCreated: jest.fn().mockResolvedValue(undefined) };
+}
+
+function asMailer(stub: ReturnType<typeof mailerStub>): NotificationMailer {
+  return stub as unknown as NotificationMailer;
+}
 
 // The registration test needs to see what the worker asks BullMQ for without a Redis to ask
 // it against. No other test in this file constructs a queue, so the stub is file-wide.
@@ -58,7 +68,11 @@ describe('DueSoonWorker', () => {
       prisma as unknown as PrismaService,
       realtime as unknown as RealtimeService,
     );
-    const worker = new DueSoonWorker(prisma as unknown as PrismaService, notifications);
+    const worker = new DueSoonWorker(
+      prisma as unknown as PrismaService,
+      notifications,
+      asMailer(mailerStub()),
+    );
 
     const created = await worker.runScan();
 
@@ -81,6 +95,58 @@ describe('DueSoonWorker', () => {
         skipDuplicates: true,
       }),
     );
+  });
+
+  it('hands the mailer one entry per stored row, after the signals', async () => {
+    const due = new Date(Date.now() + 60 * 60 * 1000);
+    const prisma = {
+      task: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 't1',
+            title: 'Ship',
+            dueDate: due,
+            board: { workspaceId: 'w1' },
+            assignees: [{ userId: 'u1' }, { userId: 'u2' }],
+          },
+        ]),
+      },
+      notification: {
+        createMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+    };
+    const realtime = { emitToUser: jest.fn() };
+    const notifications = new NotificationService(
+      prisma as unknown as PrismaService,
+      realtime as unknown as RealtimeService,
+    );
+    const mailer = mailerStub();
+    const worker = new DueSoonWorker(
+      prisma as unknown as PrismaService,
+      notifications,
+      asMailer(mailer),
+    );
+
+    await worker.runScan();
+
+    expect(mailer.sendForCreated).toHaveBeenCalledTimes(1);
+    expect(mailer.sendForCreated).toHaveBeenCalledWith([
+      {
+        workspaceId: 'w1',
+        userId: 'u1',
+        actorId: null,
+        type: NotificationType.DueSoon,
+        taskId: 't1',
+      },
+      {
+        workspaceId: 'w1',
+        userId: 'u2',
+        actorId: null,
+        type: NotificationType.DueSoon,
+        taskId: 't1',
+      },
+    ]);
   });
 
   it('skips pairs that already have a recent or unread due_soon', async () => {
@@ -107,7 +173,11 @@ describe('DueSoonWorker', () => {
       prisma as unknown as PrismaService,
       realtime as unknown as RealtimeService,
     );
-    const worker = new DueSoonWorker(prisma as unknown as PrismaService, notifications);
+    const worker = new DueSoonWorker(
+      prisma as unknown as PrismaService,
+      notifications,
+      asMailer(mailerStub()),
+    );
 
     const created = await worker.runScan();
 
@@ -162,7 +232,11 @@ describe('DueSoonWorker', () => {
       prisma as unknown as PrismaService,
       realtime as unknown as RealtimeService,
     );
-    const worker = new DueSoonWorker(prisma as unknown as PrismaService, notifications);
+    const worker = new DueSoonWorker(
+      prisma as unknown as PrismaService,
+      notifications,
+      asMailer(mailerStub()),
+    );
 
     await worker.runScan();
 
@@ -214,7 +288,11 @@ describe('DueSoonWorker', () => {
       prisma as unknown as PrismaService,
       realtime as unknown as RealtimeService,
     );
-    const worker = new DueSoonWorker(prisma as unknown as PrismaService, notifications);
+    const worker = new DueSoonWorker(
+      prisma as unknown as PrismaService,
+      notifications,
+      asMailer(mailerStub()),
+    );
 
     await expect(worker.runScan()).resolves.toBe(0);
     expect(realtime.emitToUser).not.toHaveBeenCalled();
@@ -251,7 +329,11 @@ describe('DueSoonWorker', () => {
       prisma as unknown as PrismaService,
       realtime as unknown as RealtimeService,
     );
-    const worker = new DueSoonWorker(prisma as unknown as PrismaService, notifications);
+    const worker = new DueSoonWorker(
+      prisma as unknown as PrismaService,
+      notifications,
+      asMailer(mailerStub()),
+    );
 
     await worker.runScan();
 
@@ -278,7 +360,7 @@ describe('DueSoonWorker', () => {
     function buildWorker(): DueSoonWorker {
       const prisma = { task: { findMany: jest.fn() } } as unknown as PrismaService;
       const notifications = {} as NotificationService;
-      return new DueSoonWorker(prisma, notifications);
+      return new DueSoonWorker(prisma, notifications, asMailer(mailerStub()));
     }
 
     it('registers the scan as a job scheduler, not as a deprecated repeatable job', async () => {
@@ -351,7 +433,7 @@ describe('DueSoonWorker', () => {
       process.env.REDIS_URL = 'redis://localhost:6379';
       const prisma = { task: { findMany: jest.fn() } } as unknown as PrismaService;
       const notifications = {} as NotificationService;
-      const worker = new DueSoonWorker(prisma, notifications);
+      const worker = new DueSoonWorker(prisma, notifications, asMailer(mailerStub()));
 
       await worker.onModuleInit();
 

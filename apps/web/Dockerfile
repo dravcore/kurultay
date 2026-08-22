@@ -53,6 +53,12 @@ ENV PORT=3000
 # leaving this unset makes server.js listen only on eth0, so the in-container healthcheck
 # (wget against localhost) gets connection refused. 0.0.0.0 listens on every interface.
 ENV HOSTNAME=0.0.0.0
+# The npm and yarn CLIs the base image ships are removed here for the reasons written out beside
+# the `runner` stage of apps/api/Dockerfile: nothing in this image runs either (the CMD is `node
+# apps/web/server.js` over a Next.js standalone bundle), and npm's bundled dependencies are where
+# every fixable HIGH/CRITICAL finding of the `image-scan` job came from.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+  /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public

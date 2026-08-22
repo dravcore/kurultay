@@ -2,6 +2,10 @@
 
 **Status:** Accepted
 **Date:** 2026-08-12
+**Updated:** 2026-08-21: the Consequences section's note that `dashboard.service.ts`'s move to
+`category: 'COMPLETED'` "waits until the current `perf/api-scale-debt` branch lands" is no longer
+current: `Column.category` shipped (`schema.prisma`, `dashboard.service.ts`), and the web exposes
+it in `column-settings-dialog.tsx`, as the same section already noted.
 
 > 🌐 English (canonical) | [Türkçe](../tr/decisions/0019-column-category.md)
 

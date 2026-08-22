@@ -3,6 +3,14 @@
 **Durum:** Kabul edildi
 **Tarih:** 2026-08-08
 **Güncellendi:** 2026-08-08 — Prisma 7'nin kırıcı değişikliklerini kaydeder ve PostgreSQL 18 / Redis 8'i lisans gerekçesiyle sabitler.
+**Güncellendi:** 2026-08-18 — "HTTP rate limiting henüz bağlanmadı" (aşağıdaki Gerekçe) güncelliğini
+yitirdi. Küresel bir `ThrottlerModule` + `ThrottlerGuard` (`apps/api/src/app.module.ts`) artık
+her HTTP isteğini sınırlıyor ve Better Auth kendi rotaları için üzerine ikinci, Redis destekli
+bir limiter taşıyor (`apps/api/src/auth/auth-rate-limit.ts`) — #277'den beri bu limiter, bir Redis
+hatasında açık kalmak yerine sınırlı, süreç başına bellek-içi bir sayaca düşüyor (audit bulgusu
+SEC-03). Kalan nüans şu: Nest `ThrottlerModule`'ün kendisi hâlâ Redis kullanmıyor — sayaçları
+kütüphanenin varsayılan bellek-içi deposu, yani yalnızca Better Auth'un kendi limiter'ı bir Redis
+işi, API'nin genel amaçlı olanı değil.
 
 > 🌐 [English (canonical)](../../decisions/0002-backend-stack.md) | Türkçe — Bu çeviri güncel olmayabilir; kanonik kaynak İngilizce'dir.
 

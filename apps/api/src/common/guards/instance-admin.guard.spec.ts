@@ -7,7 +7,7 @@ import {
 } from './instance-admin.guard';
 import type { AuthedRequest } from '../types/request-context';
 
-function mockContext(email: string | undefined): ExecutionContext {
+function mockContext(email: string | undefined, emailVerified = true): ExecutionContext {
   const request: Partial<AuthedRequest> = email
     ? {
         user: {
@@ -15,7 +15,7 @@ function mockContext(email: string | undefined): ExecutionContext {
           email,
           name: 'A',
           avatarUrl: null,
-          emailVerified: true,
+          emailVerified,
           createdAt: new Date(),
         },
       }
@@ -105,6 +105,30 @@ describe('InstanceAdminGuard', () => {
 
     expect(() => guard.canActivate(mockContext(undefined))).toThrow(ForbiddenException);
     expect(isInstanceAdmin(undefined)).toBe(false);
+  });
+
+  /**
+   * `requireEmailVerification: false` (see `auth.ts`) means a session can exist before mailbox
+   * ownership is proven, and a deleted account's address is freed for a fresh sign-up (see
+   * `anonymised-user.ts`). Being listed in `INSTANCE_ADMIN_EMAILS` must not be enough on its
+   * own: registering a listed-but-unregistered or freed admin address must not grant instance
+   * administration to someone who has never received mail at it.
+   */
+  it('refuses a listed address whose email is not yet verified', () => {
+    process.env[INSTANCE_ADMIN_EMAILS_ENV] = 'ops@example.com';
+    const guard = new InstanceAdminGuard();
+
+    expect(() => guard.canActivate(mockContext('ops@example.com', false))).toThrow(
+      ForbiddenException,
+    );
+  });
+
+  /** The positive case for the check above: verified and listed still passes. */
+  it('admits a listed address whose email is verified', () => {
+    process.env[INSTANCE_ADMIN_EMAILS_ENV] = 'ops@example.com';
+    const guard = new InstanceAdminGuard();
+
+    expect(guard.canActivate(mockContext('ops@example.com', true))).toBe(true);
   });
 
   /** Read per request, so a restart — or a spec — changes the answer with no rebuild. */

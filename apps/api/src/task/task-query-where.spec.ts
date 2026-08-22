@@ -37,6 +37,19 @@ describe('buildListWhere', () => {
       ]);
     });
 
+    // Prisma's `contains` is not a literal-string match — see `escapeLikePattern`'s doc comment
+    // for the empirical proof that an unescaped `%`/`_` keeps its SQL `ILIKE` wildcard meaning.
+    it('escapes % and _ in the search string so they match literally', () => {
+      expect(buildListWhere(BOARD_ID, query({ q: '50%_off' })).AND).toEqual([
+        {
+          OR: [
+            { title: { contains: '50\\%\\_off', mode: 'insensitive' } },
+            { description: { contains: '50\\%\\_off', mode: 'insensitive' } },
+          ],
+        },
+      ]);
+    });
+
     it('treats several priorities as a membership test', () => {
       expect(
         buildListWhere(BOARD_ID, query({ priority: [Priority.HIGH, Priority.URGENT] })).AND,

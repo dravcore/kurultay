@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import {
+  ATTACHMENT_QUOTA_ERROR,
   type AttachmentDto,
   AttachmentKind,
   type CreateAttachmentLinkRequest,
@@ -177,6 +178,10 @@ export function useTaskAttachments({
         toast.error(
           resolveApiMessage(caught, t, {
             fallback: 'saveError',
+            // A quota 413 and a size-limit 413 ask the user for different things — a smaller
+            // file cannot fix a full workspace — so the quota is told apart by the envelope's
+            // `error` before the status is consulted (ADR 0027).
+            byError: { [ATTACHMENT_QUOTA_ERROR]: 'quotaExceeded' },
             byStatus: { 403: 'forbidden', 413: 'tooLarge', 415: 'wrongType' },
           }),
         );

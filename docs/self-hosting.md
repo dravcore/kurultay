@@ -3,14 +3,24 @@
 Put Kurul on a server, on your domain, with HTTPS and working email. Everything below is
 one page on purpose; budget about an hour, most of it waiting for DNS.
 
+> 🌐 English (canonical) | [Türkçe](tr/self-hosting.md)
+
 There is no build step. `docker compose pull` fetches images published for every release, and
 the same image works on every domain — the API URL is not compiled into it (see
 [Why there is no rebuild](#why-there-is-no-rebuild) if you want the reasoning).
 
+> **Installing v0.2.0? Use `git clone` instead.** Releases up to and including v0.2.0
+> published only the `api` and `web` images; the third one this page pulls, `kurul-migrate`,
+> exists from the first release after v0.2.0 onward. The download step below fetches no source
+> tree to build it from, so on v0.2.0 the steps on this page cannot start the stack — install
+> from a clone as shown in [Troubleshooting](#troubleshooting), and come back to this page
+> from the next release on.
+
 ## What you need
 
 - A server with a public IP, Docker Engine 24+ and the Compose plugin. Two CPUs and 2 GB of
-  RAM is enough for a small team.
+  RAM is enough for a small team — see [Server sizing](#server-sizing) for how that 2 GB is
+  actually spent.
 - A domain you control, with **ports 80 and 443 open** to that server. Both are required:
   Let's Encrypt validates over port 80, browsers use 443.
 - An SMTP account. Kurul needs outgoing mail before anyone can accept an invitation — see
@@ -28,6 +38,48 @@ the same image works on every domain — the API URL is not compiled into it (se
   "temporarily" reach Postgres — is exposed to the internet even with `ufw deny 5432` in place.
   The firewall protects the things Docker is not managing; the `ports:` list is what protects
   the rest, which is why this stack keeps it to one service.
+
+## Server sizing
+
+Every service in `docker-compose.yml` carries a `mem_limit` (OPS-05, 2026-08-18 audit). Before
+this, nothing capped how much memory any one container could take, so on a host near its 2 GB
+budget the _kernel_ OOM killer picked which process died — it scores every process on the host,
+not just this stack's, and has no reason to spare Postgres over whichever container actually
+grew. A `mem_limit` puts that decision back where it belongs: a container is only ever killed
+for outgrowing its own ceiling, and nothing another service does can take Postgres down with it.
+
+| Service    | `mem_limit` | Why this number                                                                                 |
+| ---------- | ----------- | ----------------------------------------------------------------------------------------------- |
+| `postgres` | 512m        | Generous baseline for a small-team board's working set                                          |
+| `api`      | 512m        | `REQUEST_BODY_MAX_BYTES` / `ATTACHMENT_MAX_BYTES` (`.env.example`) both buffer into its heap    |
+| `web`      | 512m        | Same Next.js SSR process, same "no ceiling chosen" problem as `api`                             |
+| `migrate`  | 512m        | Matches `api` — same build stage, same Prisma CLI, just once at startup                         |
+| `backup`   | 256m        | `pg_dump` streams rather than buffering; this covers process overhead and the attachments `tar` |
+| `redis`    | 128m        | Cache, sessions, rate limits, notifications only — never board data, small bounded working set  |
+| `proxy`    | 128m        | Terminates TLS and proxies; bodies pass through Caddy rather than buffering into it             |
+
+`api` and `web` also set `NODE_OPTIONS=--max-old-space-size=384` — 75% of their 512m ceiling —
+so V8's heap is pinned explicitly rather than left to Node's own container-memory heuristic. The
+remaining 128m of headroom below `mem_limit` is for what a heap ceiling alone doesn't cover
+(thread stacks, native buffers, code space): V8 hits its own catchable "JavaScript heap out of
+memory" before the cgroup's hard limit does, which shows up as a line in `docker compose logs
+api` (or `web`) instead of a bare `SIGKILL`.
+
+These are ceilings, not reservations — a container using less than its `mem_limit` costs nothing
+extra, and `migrate` in particular exits (successfully) before `api` and `web` finish starting,
+so it is never actually concurrent with them. Summed as if every long-running service hit its
+ceiling at once — `postgres` + `api` + `web` + `redis` + `proxy` + `backup`, excluding `migrate`,
+which by the time the others are up has already exited — that is 512 + 512 + 512 + 128 + 128 +
+256 = 2048 MB, which is exactly the 2 GB this page has always asked for. A host with less
+headroom than that under real traffic is a reason to raise these numbers (`docker-compose.yml`
+is a plain edit, or override them in a `docker-compose.override.yml`) or the box's own RAM, not
+to remove the ceiling — see the note above for what removing it gets you back.
+
+**Not verified by measurement**: these numbers come from the request/attachment ceilings already
+documented in `.env.example` and from V8's own heap-sizing conventions, not from running the
+stack under load at each limit. If a container is killed for hitting its `mem_limit` in
+practice, `docker compose ps` shows it exited (often `137`), and `docker compose logs <service>`
+is the place to start — raise that one service's limit rather than every service's.
 
 ## 1. DNS
 
@@ -53,8 +105,15 @@ mkdir -p /opt/kurul && cd /opt/kurul
 curl -fsSLO https://raw.githubusercontent.com/dravcore/kurul/main/docker-compose.yml
 curl -fsSL --create-dirs -o docker/Caddyfile \
   https://raw.githubusercontent.com/dravcore/kurul/main/docker/Caddyfile
+curl -fsSL --create-dirs -o scripts/backup.sh \
+  https://raw.githubusercontent.com/dravcore/kurul/main/scripts/backup.sh
+chmod +x scripts/backup.sh
 curl -fsSL -o .env https://raw.githubusercontent.com/dravcore/kurul/main/.env.example
 ```
+
+`scripts/backup.sh` is not optional: the `backup` service in `docker-compose.yml` bind-mounts
+that exact path into its container, and without the file the scheduled backups that service
+exists to take never run.
 
 Edit `.env`. For a Docker-only install these are the lines that matter — everything else in the
 file is either for the development loop or has a working default:
@@ -73,8 +132,11 @@ SMTP_SECURE=false                              # true only for port 465
 MAIL_FROM=Kurul <kurul@example.com>
 ```
 
-Generate the two secrets with `openssl rand -hex 32`. Use `-hex`, not `-base64`: a base64
-string can contain `/`, and both values end up inside a URL where a slash truncates it.
+Generate both secrets with `openssl rand -hex 32`. `POSTGRES_PASSWORD` is embedded directly in
+a connection URL, where a `/` from `-base64` output would truncate it — `-hex`'s alphabet
+(`0-9a-f`) has none. `BETTER_AUTH_SECRET` is only ever byte-compared, so it carries no such
+constraint, but generating it with `-hex` too means one generator to remember instead of a
+per-variable rule.
 
 `SITE_URL` carries the scheme because that is what decides whether Caddy serves plain HTTP or
 obtains a certificate. `https://…` switches automatic HTTPS on. `http://localhost` (the
@@ -86,6 +148,35 @@ the box — the `.env` copy of that variable is for the development loop only. T
 may want to change is `ATTACHMENT_MAX_BYTES` (default `26214400`, 25 MiB), and if you do, read
 [the proxy contract below](#bringing-your-own-reverse-proxy) first: the reverse proxy carries a
 separate, deliberately higher ceiling that has to move with it.
+
+**Attachment storage is capped by default, and it shares Postgres's disk.** The
+`attachment_data` volume lives on the same host filesystem as the database, so a full disk
+stops Postgres, not just uploads. Two variables cap the total
+([ADR 0027](decisions/0027-attachment-quotas.md), updated 2026-08-21):
+`ATTACHMENT_WORKSPACE_QUOTA_BYTES` (summed stored-file bytes per workspace) and
+`ATTACHMENT_INSTANCE_QUOTA_BYTES` (the whole instance). Unset, they are **2 GiB per workspace
+(`2147483648`) and 20 GiB per instance (`21474836480`)**; a written `0` lifts one entirely, and
+a negative value refuses to boot. Set the instance one below your volume's real headroom on
+any machine whose disk you care about. The API logs the effective numbers at start
+(`Attachment ceilings: … (default)` / `(env)` in `docker compose logs api`), and warns, rather
+than refusing, if the workspace quota is set above the instance quota. When sizing, know that
+the quotas are **soft** (simultaneous uploads can each overshoot by at most one file, so leave
+a few `ATTACHMENT_MAX_BYTES` of slack) and that deleted files keep their bytes until the
+nightly orphan sweep's grace period passes, so disk usage briefly exceeds what the quota
+accounts for. Link attachments store no bytes and never count. A rejected upload is a `413`
+whose JSON body carries `error: "Attachment Quota Exceeded"`, see
+[Telling the 413s apart](#telling-the-413s-apart).
+
+**Uploads are also budgeted in bytes per minute.** `ATTACHMENT_UPLOAD_BYTES_PER_MINUTE`
+(default `268435456`, 256 MiB, about ten max-size uploads) is the most one client IP may submit
+to the upload route in a fixed minute, charged from each request's `Content-Length` before the
+body is read (a multipart request without one is charged `ATTACHMENT_MAX_BYTES`). It exists
+because the per-route request throttle counts requests, which is the wrong unit for disk. `0`
+switches it off. It is keyed by the same client IP as every other limit, so it needs the
+`TRUST_PROXY` setting the bundled Compose file already carries to see through the proxy; the
+counters live in Redis and fall back to process memory while Redis is erroring. Over budget is
+a `429` whose JSON body carries `error: "Upload Budget Exceeded"` and a `Retry-After` header
+([api-conventions.md](api-conventions.md#rate-limiting)).
 
 **Trello import needs no line here either.** `TRELLO_IMPORT_MAX_BYTES` (default `20971520`,
 20 MiB) is the largest board export the importer will accept, and the bundled Compose file
@@ -113,7 +204,7 @@ check. A healthy stack reads like this:
 
 ```
 api        Up 27 seconds (healthy)
-backup     Up 28 seconds
+backup     Up 28 seconds (health: starting)
 migrate    Exited (0) 27 seconds ago
 postgres   Up 34 seconds (healthy)
 proxy      Up 16 seconds
@@ -123,8 +214,10 @@ web        Up 22 seconds (healthy)
 
 `Exited (0)` on `migrate` is success — migrations applied, job done. A non-zero exit there is
 the one to chase (`docker compose logs migrate`), and `api` will not have started at all.
-`backup` and `proxy` show no `(healthy)` because neither declares a healthcheck, not because
-anything is wrong with them.
+`proxy` shows no `(healthy)` at all because it declares no healthcheck. `backup` does declare
+one — it watches for a fresh dump in `/backups` — but its `start_period` is generous (10
+minutes) so a database still taking its first `pg_dump` reads as `(health: starting)`, not
+unhealthy; give it time and check again with `docker compose ps backup`.
 
 The first request to `https://kurul.example.com` may take a few seconds while Caddy
 completes the ACME challenge. Watch it happen if it does not:
@@ -207,6 +300,26 @@ The full parameter list — 5-minute interval, 2 consecutive failures before ale
 [Uptime monitoring](development.md#uptime-monitoring--set-this-up-it-is-the-one-that-catches-an-outage),
 along with the push-based alternative for an instance that is not reachable from the internet.
 
+**Also watch backup freshness — `/api/health/ready` does not cover it.** The `backup` sidecar
+can stop producing dumps (a `pg_dump` that keeps failing, a volume that filled up) without ever
+touching the database connection the API's readiness probe checks, so that endpoint stays green
+through the whole outage. `backup`'s own Docker healthcheck is the signal instead: unhealthy
+means the newest `/backups/kurul-*.dump` is older than `2 × BACKUP_INTERVAL` (48 hours on the
+default 24h interval), which is the point at which the API's own retention sweep can no longer
+assume a recent dump exists to fall back on. Point your monitor's container-health check (most
+uptime tools that support Docker, or a cron `docker inspect` on the host) at it, or at minimum
+check it by hand periodically:
+
+```bash
+docker compose ps backup                                        # "(healthy)" or "(unhealthy)"
+docker inspect --format '{{.State.Health.Status}}' kurul-backup-1
+```
+
+An `(unhealthy)` `backup` does not need a restart — `restart: unless-stopped` does not act on
+health status, so the sidecar keeps running and retrying on its own — it needs
+`docker compose logs backup` read, because something (usually a failing `pg_dump`) is actually
+wrong and the next scheduled cycle inherits the same problem until that's fixed.
+
 Then fire it once on purpose, because an alerting setup that has never fired is a hypothesis:
 
 ```bash
@@ -227,7 +340,9 @@ Invitations are the one feature that hard-fails without SMTP: accepting an invit
 a verified email address, and verification needs a delivered message
 ([ADR 0013](decisions/0013-invitation-email-verification.md)). With `SMTP_HOST` unset the API
 still boots and logs the message instead of sending it, so a solo install works fine — but
-nobody can join your workspace. The Members screen says so in the product, too.
+nobody can join your workspace. The Members screen says so in the product, too. Notification
+email (assignment, mention, due-soon) uses the same settings and simply stays off without
+them; once SMTP works, each user can switch it off for themselves under Settings.
 
 Any SMTP provider works. Two things go wrong most often:
 
@@ -277,6 +392,26 @@ docker compose pull && docker compose up -d
 Migrations run automatically: the one-shot `migrate` service applies them before `api` starts.
 Pin a release with `TAG=v0.2.0` in `.env` if you would rather upgrade deliberately than track
 `latest`.
+
+### Attachment quotas now have defaults
+
+Releases after `v0.2.0` cap attachment storage at 2 GiB per workspace and 20 GiB per instance
+when `ATTACHMENT_WORKSPACE_QUOTA_BYTES` / `ATTACHMENT_INSTANCE_QUOTA_BYTES` are unset (they
+used to mean unlimited). **A workspace already holding more than 2 GiB of files will get a
+`413` on its next upload** unless you set a higher number, or `0` for unlimited, before you
+upgrade. One query says where you stand; the first line is the instance, the second is per
+workspace:
+
+```bash
+docker compose exec postgres psql -U kurul -d kurul -c \
+  "SELECT COALESCE(SUM(size), 0) AS instance_bytes FROM \"Attachment\" WHERE kind = 'FILE';"
+docker compose exec postgres psql -U kurul -d kurul -c \
+  "SELECT w.slug, SUM(a.size) AS bytes FROM \"Attachment\" a JOIN \"Task\" t ON t.id = a.\"taskId\" JOIN \"Board\" b ON b.id = t.\"boardId\" JOIN \"Workspace\" w ON w.id = b.\"workspaceId\" WHERE a.kind = 'FILE' GROUP BY w.slug ORDER BY bytes DESC;"
+```
+
+Compare the numbers against `2147483648` and `21474836480`. The same upgrade adds a per-IP
+upload byte budget (`ATTACHMENT_UPLOAD_BYTES_PER_MINUTE`, 256 MiB a minute by default), which
+only matters to a client that uploads more than ten max-size files a minute from one address.
 
 ### Coming from Kurultay (v0.1.0)
 
@@ -345,9 +480,11 @@ cosign verify \
   ghcr.io/dravcore/kurul-api:v0.2.0
 ```
 
-Repeat it for `kurul-web`, and replace `v0.2.0` in both places when you verify another
-release. The version appears twice for two different reasons: once as the git ref the signing
-workflow ran on, and once as the image tag you are asking about.
+Repeat it for `kurul-web` — and, on releases after v0.2.0, for `kurul-migrate`, which is
+signed the same way from the release that first publishes it — and replace `v0.2.0` in both
+places when you verify another release. The version appears twice for two different reasons:
+once as the git ref the signing workflow ran on, and once as the image tag you are asking
+about.
 
 **The two `--certificate-*` flags are the entire check; do not drop them.** There is no signing
 key to guard here. The images are signed keylessly: the release workflow trades a GitHub OIDC
@@ -396,6 +533,8 @@ kurul-api-v0.2.0-linux-arm64.spdx.json
 kurul-web-v0.2.0-linux-amd64.spdx.json
 kurul-web-v0.2.0-linux-arm64.spdx.json
 ```
+
+Releases after v0.2.0 add the same pair for `kurul-migrate`.
 
 The format is SPDX 2.3 JSON, which is what `grype`, `trivy` and Dependency-Track all read
 without conversion:
@@ -480,6 +619,7 @@ to do with uploads. **The response body is what says which one did it**:
 | `413` with a **JSON** body carrying `statusCode`   | the API         | working as designed — the file is over `ATTACHMENT_MAX_BYTES`    |
 | `413` with an **empty** body (`Content-Length: 0`) | the proxy       | the body was over the proxy's ceiling, which is the coarse cut   |
 | `413` JSON reading `Request body is too large`     | the API         | not an upload at all — a JSON body over `REQUEST_BODY_MAX_BYTES` |
+| `413` JSON, `error: "Attachment Quota Exceeded"`   | the API         | the file fits, the storage doesn't — a quota is full (see above) |
 
 The first row is the normal answer for an oversized attachment, and the one a user can act on:
 it names the limit. The second is the proxy refusing a body before the API ever saw it — correct
@@ -491,8 +631,13 @@ The third row is a different limit that happens to share the status code: `REQUE
 and no attachment ever passes through it. If you see it, nothing about your storage or your proxy
 is misconfigured — some request simply sent more JSON than the API accepts.
 
-There is a fourth, and only one endpoint can produce it: a `413` on
-`POST /workspaces/…/imports/trello` is `TRELLO_IMPORT_MAX_BYTES` (20 MiB), not any of the three
+The fourth row is a different failure again: the file is under `ATTACHMENT_MAX_BYTES`, but storing
+it would push a workspace or the instance over its quota. See "Attachment storage is unbounded
+until you cap it, and it shares Postgres's disk" above for sizing `ATTACHMENT_WORKSPACE_QUOTA_BYTES`
+and `ATTACHMENT_INSTANCE_QUOTA_BYTES`.
+
+There is a fifth, and only one endpoint can produce it: a `413` on
+`POST /workspaces/…/imports/trello` is `TRELLO_IMPORT_MAX_BYTES` (20 MiB), not any of the four
 above. The route in the response envelope's `path` is what tells it apart. If a user hits it on an
 export **under** 20 MiB, the proxy cut the body first and the ceiling to look at is the proxy's.
 
@@ -570,16 +715,17 @@ deployment — which is the trade-off, not an oversight.
 
 ## Troubleshooting
 
-**`docker compose pull` ends in `denied`.** The `api` and `web` images are published by a
-workflow that runs on a release tag, so they exist for `v0.2.0` and later and not for anything
-older. Two things follow while you are on a release that predates them. `docker compose pull`
-exits non-zero after successfully pulling `postgres`, `redis` and `caddy` — read the tail of its
-output, not just the exit code, because the three that worked scroll the two that did not off
-the screen. And the files you fetch in step 2 come from the `main` branch, which only carries
-what the newest release carried: if `docker-compose.yml` has no `proxy:` service and there is no
-`docker/Caddyfile` to download, you are ahead of the release, and none of the HTTPS in this
-guide applies to what you just downloaded. Either wait for the release, or build from source
-instead of pulling:
+**`docker compose pull` ends in `denied`.** The images are published by a workflow that runs
+on a release tag, so each exists only from the release that first shipped it: `api` and `web`
+from `v0.2.0`, `kurul-migrate` from the first release after `v0.2.0` — on `v0.2.0` the pull
+fails for that one image even though the other two resolve. Two things follow while you are on
+a release that predates an image. `docker compose pull` exits non-zero after successfully
+pulling `postgres`, `redis` and `caddy` — read the tail of its output, not just the exit code,
+because the ones that worked scroll the ones that did not off the screen. And the files you
+fetch in step 2 come from the `main` branch, which only carries what the newest release
+carried: if `docker-compose.yml` has no `proxy:` service and there is no `docker/Caddyfile` to
+download, you are ahead of the release, and none of the HTTPS in this guide applies to what
+you just downloaded. Either wait for the release, or build from source instead of pulling:
 
 ```bash
 git clone https://github.com/dravcore/kurul.git && cd kurul
@@ -587,8 +733,9 @@ docker compose up -d --build
 ```
 
 That is slower — the api image is a minute or so of build — and it is the only difference.
-`docker-compose.yml` carries `image:` and `build:` for both services on purpose, so the same
-file installs from a published image when one is resolvable and from source when it is not.
+`docker-compose.yml` carries `image:` and `build:` for all three services on purpose, so the
+same file installs from a published image when one is resolvable and from source when it is
+not.
 
 **Certificate never issues.** Ports 80 and 443 must both reach the server from the public
 internet, and DNS must already resolve. `docker compose logs proxy` names the failure. Hitting

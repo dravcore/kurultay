@@ -23,6 +23,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
@@ -68,7 +71,10 @@ jobs:
       # passes health commands through `/bin/sh -c`. The wait step below polls the HTTP port
       # instead, which is the thing the suite actually needs to be up.
       mailpit:
-        image: axllent/mailpit:latest
+        # Dependabot does not track images used in a workflow `services:` block (only
+        # `docker-compose*.yml` and Dockerfiles), so this pin is not auto-bumped — when the
+        # docker-compose.dev.yml mailpit pin moves, update this one by hand to match.
+        image: axllent/mailpit:v1.31.0@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
         ports:
           - 1025:1025
           - 8025:8025

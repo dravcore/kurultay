@@ -26,10 +26,6 @@ const PRIORITY_META: Record<Priority, { icon: LucideIcon; className: string; lab
     },
   };
 
-export function priorityMeta(priority: Priority) {
-  return PRIORITY_META[priority];
-}
-
 interface PriorityIconProps {
   priority: Priority;
   className?: string;

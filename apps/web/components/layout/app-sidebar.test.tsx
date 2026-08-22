@@ -7,8 +7,9 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',
 }));
 
+const workspaceContext = { onSignOut: vi.fn() };
 vi.mock('./workspace-provider', () => ({
-  useWorkspaceContext: () => ({ onSignOut: vi.fn() }),
+  useWorkspaceContext: () => workspaceContext,
 }));
 
 vi.mock('./workspace-switcher', () => ({
@@ -143,5 +144,18 @@ describe('AppSidebar collapse state (FE-08)', () => {
     });
 
     expect(isCollapsed()).toBe(false);
+  });
+});
+
+describe('AppSidebar sign out', () => {
+  it('calls the workspace context sign-out when the button is clicked', () => {
+    // Expanded: the label-less icon button below the breakpoint has no accessible name to
+    // query by, and signing out is not the collapsed rail's contract under test here.
+    installMatchMedia(false);
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    expect(workspaceContext.onSignOut).toHaveBeenCalledTimes(1);
   });
 });

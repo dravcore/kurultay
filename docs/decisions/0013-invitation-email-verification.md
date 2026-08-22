@@ -21,7 +21,7 @@ hardened default would apply to us automatically — except `apps/api/src/auth/a
 keeps the gap open.
 
 That override was not an oversight. At the time it was written, `sendInvitationEmail` was a
-no-op (email delivery was deferred beyond MVP — see [roadmap.md](../roadmap.md)) and
+no-op (email delivery was deferred beyond MVP — see [ROADMAP.md](../../ROADMAP.md)) and
 `emailAndPassword.requireEmailVerification` was already `false`, so no user could ever reach a
 verified state; turning the invitation check on as-is would have made every invitation
 permanently unacceptable instead of merely insecure. Upgrading the better-auth dependency
@@ -73,7 +73,7 @@ now requires a verified email address.
   SMTP configuration degrades to "invitations fail" rather than "the API is down" — invite
   send and invite accept are the only code paths that touch it at launch.
 - Future notification email (mentions, due-soon reminders — see
-  [roadmap.md — Beyond MVP](../roadmap.md#beyond-mvp)) can reuse the same module and the same
+  [ROADMAP.md — Beyond MVP](../../ROADMAP.md#beyond-mvp)) can reuse the same module and the same
   environment variables instead of introducing a second mail path later.
 
 ## Alternatives considered

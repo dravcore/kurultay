@@ -46,7 +46,7 @@ export class AccountController {
    * Deletes the caller's account: `204`, and the session it was sent with is over.
    *
    * The cookies are cleared on the way out because Better Auth's `session.cookieCache` answers
-   * from a signed cookie for up to five minutes without consulting the database, so deleting
+   * from a signed cookie for up to 60 seconds without consulting the database, so deleting
    * the `Session` rows does not by itself stop this browser presenting a valid session. Clearing
    * them here closes that window for the browser that asked — which is every browser on this
    * path (ADR 0026 §"Consequences" covers the administrator path, where it cannot be closed).

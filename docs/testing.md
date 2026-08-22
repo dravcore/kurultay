@@ -231,18 +231,31 @@ makes that impossible rather than unlikely.
 
 ## File conventions
 
-| Kind                   | Location                       | Pattern                                                                                                                                                                                                                             |
-| ---------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit                   | Colocated with the source file | `apps/api/src/task/task.service.spec.ts`                                                                                                                                                                                            |
-| Integration            | Separate test root             | `apps/api/test/task.e2e-spec.ts`                                                                                                                                                                                                    |
-| Test helpers/factories | Shared under the test root     | `apps/api/test/helpers/`, `apps/api/test/factories/`                                                                                                                                                                                |
-| Temporary storage root | Beside the database helper     | `apps/api/test/helpers/storage.ts`                                                                                                                                                                                                  |
-| Input fixtures         | Under the test root, by source | `apps/api/test/fixtures/trello/` — hand-written Trello exports read by both unit and integration tests; the directory's own README records that none of them is a real export ([ADR 0025](decisions/0025-trello-import-mapping.md)) |
-| Browser e2e            | Repository-level package       | `e2e/tests/board-realtime.spec.ts`                                                                                                                                                                                                  |
-| Browser e2e helpers    | Beside them                    | `e2e/support/`, `e2e/stack-env.ts`                                                                                                                                                                                                  |
+| Kind                   | Location                       | Pattern                                                                                                                                                                                                                                                         |
+| ---------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit                   | Colocated with the source file | `apps/api/src/task/task.service.spec.ts`                                                                                                                                                                                                                        |
+| Integration            | Separate test root             | `apps/api/test/task.e2e-spec.ts`                                                                                                                                                                                                                                |
+| Test helpers/factories | Shared under the test root     | `apps/api/test/helpers/`, `apps/api/test/factories/`                                                                                                                                                                                                            |
+| Temporary storage root | Beside the database helper     | `apps/api/test/helpers/storage.ts`                                                                                                                                                                                                                              |
+| Input fixtures         | Under the test root, by source | `apps/api/test/fixtures/trello/` — hand-written Trello exports read by both unit and integration tests, plus two anonymised real exports under `real/`; the directory's own README records which is which ([ADR 0025](decisions/0025-trello-import-mapping.md)) |
+| Browser e2e            | Repository-level package       | `e2e/tests/board-realtime.spec.ts`                                                                                                                                                                                                                              |
+| Browser e2e helpers    | Beside them                    | `e2e/support/`, `e2e/stack-env.ts`                                                                                                                                                                                                                              |
 
 Nest's generator calls integration tests `*.e2e-spec.ts`; that name is kept for tooling
 compatibility even though these are API integration tests, not browser e2e.
+
+**Real Trello exports.** `apps/api/test/fixtures/trello/real/` holds real exports that went
+through `scripts/anonymise-trello-export.mjs` (structure kept byte for byte, every piece of text
+replaced by a same-length pseudonym) — as of 2026-08-22, two of them, Trello's own default
+"Starter Guide" board and an eleven-list board. `trello-import-real.e2e-spec.ts` imports every
+`*.json` in it through the real endpoint and checks the report and the database against counts
+derived from the file; both import cleanly, with no reader-level field-mapping diff against the
+synthetic fixtures ([`fixtures/trello/README.md#field-mapping-diffs`](../apps/api/test/fixtures/trello/README.md#field-mapping-diffs)).
+Were the directory ever empty, the spec would report exactly one skipped test,
+`no anonymised real Trello exports in fixtures/trello/real yet (v0.3.0 gate)`, so an open gate
+would stay visible in CI. The anonymiser's own unit tests run on `node:test` via
+`pnpm test:scripts`, because `scripts/` has no dependencies; the same spec also proves, on the
+synthetic fixture, that an anonymised export imports identically to its original.
 
 ## Running tests
 
@@ -258,12 +271,22 @@ pnpm --filter @kurul/api test:cov      # api coverage report
 pnpm --filter @kurul/web test          # web unit (Vitest)
 pnpm --filter @kurul/web test:watch    # web unit, watch mode
 
+pnpm test:scripts                         # scripts/ (node:test, no dependencies)
+
 pnpm test:browser                         # browser e2e (needs Mailpit too)
 ```
 
 Integration tests run against a **separate database** (`kurul_test`), created and
 migrated by the test setup. They never touch the development database. The browser suite
 uses a third one — see [Isolation](#isolation).
+
+None of these commands needs `packages/*/dist`. Both Jest configs and the Vitest configs map
+`@kurul/shared-types` and `@kurul/auth-access` to the packages' `src/index.ts`, so the suites
+compile the same source `pnpm typecheck` reads and cannot pass against a stale build;
+`apps/api/src/workspace-packages.spec.ts`, `apps/api/test/harness.e2e-spec.ts` and
+`apps/web/workspace-packages.test.ts` fail if that mapping is ever removed. The build is still
+required for `pnpm typecheck`, `nest build`, `next build` and `pnpm dev`, see
+[development.md](development.md#clone-and-install).
 
 ## Writing tests
 
@@ -348,19 +371,21 @@ on every run, passing or failing.
 
 Every pull request runs, on `develop` and `main` as well:
 
-| Step                | Command                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------- |
-| Build shared pkgs   | `pnpm --filter @kurul/shared-types build && pnpm --filter @kurul/auth-access build`         |
-| Lint                | `pnpm lint`                                                                                 |
-| Format check        | `pnpm format:check`                                                                         |
-| Typecheck           | `pnpm typecheck` (`tsc --noEmit` across workspaces)                                         |
-| Audit               | `pnpm audit --audit-level high`                                                             |
-| Unit tests (api)    | `pnpm --filter @kurul/api test:cov`                                                         |
-| Unit tests (web)    | `pnpm --filter @kurul/web exec vitest run --coverage`                                       |
-| Unit tests (pkgs)   | `pnpm --filter "./packages/*" test`                                                         |
-| Integration tests   | `pnpm --filter @kurul/api test:e2e` against Postgres and Redis service containers           |
-| Build               | `pnpm build`                                                                                |
-| **Gate** (required) | `ci-ok` — passes only if `lint`, `test`, and `build` all succeed (not skipped or cancelled) |
+| Step                 | Command                                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| Build shared pkgs    | `pnpm --filter @kurul/shared-types build && pnpm --filter @kurul/auth-access build`                      |
+| Lint                 | `pnpm lint`                                                                                              |
+| Format check         | `pnpm format:check`                                                                                      |
+| Typecheck            | `pnpm typecheck` (`tsc --noEmit` across workspaces)                                                      |
+| Audit                | `pnpm audit --audit-level high`                                                                          |
+| Unit tests (api)     | `pnpm --filter @kurul/api test:cov`                                                                      |
+| Unit tests (web)     | `pnpm --filter @kurul/web exec vitest run --coverage`                                                    |
+| Unit tests (pkgs)    | `pnpm --filter "./packages/*" test`                                                                      |
+| Unit tests (scripts) | `pnpm test:scripts`                                                                                      |
+| Integration tests    | `pnpm --filter @kurul/api test:e2e` against Postgres and Redis service containers                        |
+| Build                | `pnpm build`                                                                                             |
+| Image build + scan   | The three shipped images, then Trivy over each (see below)                                               |
+| **Gate** (required)  | `ci-ok` — passes only if `lint`, `test`, `build` and `image-scan` all succeed (not skipped or cancelled) |
 
 **All steps must pass before merge.** The gate job (`ci-ok`) is the single required status check
 configured in branch protection — if any upstream job fails, is skipped, or is cancelled, the
@@ -382,6 +407,28 @@ CI runs on pull requests to any branch (`pull_request.branches: ['**']`) and on 
 `develop` and `main`. See [git-strategy.md](git-strategy.md#pull-request-process).
 
 The workflow file is [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+
+### Image build and CVE scan
+
+`image-scan` builds the three images this project ships (`kurul-api` at its `runner` and
+`migrate` targets, and `kurul-web`) and runs Trivy over each one. A HIGH or CRITICAL
+vulnerability **that has a fix available** fails the leg, and with it the gate. Before this
+job existed the only thing that ever built a Dockerfile was `release-images.yml`, which runs
+on a tag push, so a broken image or a vulnerable base was found by the workflow whose job is
+to publish it.
+
+Two choices are worth knowing about:
+
+- **Unfixed advisories are ignored** (`ignore-unfixed: true`). A base-image CVE with no fixed
+  version anywhere would fail every pull request for something no pull request can do, and a
+  check that is always red is a check nobody reads. What is left is the actionable set: a base
+  image bump or a dependency bump.
+- **It runs beside `lint` and `test`, not after `build`.** The job is off the critical path on
+  purpose, so it costs runner minutes rather than pipeline wall time, and it reads a buildx
+  layer cache (`type=gha`) that the `develop` runs of this same workflow write.
+
+Nothing is pushed: `push: false` with `load: true` keeps each image inside its own runner.
+Publishing stays in `release-images.yml`, behind a tag.
 
 ### Browser e2e in CI
 
@@ -413,4 +460,4 @@ failure diagnosable the next morning without reproducing it.
 - [coding-standards.md](coding-standards.md) — code conventions tests assume
 - [api-conventions.md](api-conventions.md) — status codes and error shapes to assert on
 - [git-strategy.md](git-strategy.md) — PR requirements
-- [roadmap.md](roadmap.md) — MVP status and Beyond MVP
+- [../ROADMAP.md](../ROADMAP.md) — MVP status and Beyond MVP

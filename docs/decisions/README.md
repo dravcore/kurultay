@@ -31,8 +31,8 @@ debate. These are intentionally short and factual, not design documents.
 | [0011](0011-label-task-metadata-permissions.md)        | Label and Task-Metadata Permissions                                                                      | Accepted (comment-delete row superseded by 0012)       | 2026-08-09 |
 | [0012](0012-comment-delete-authorship.md)              | Comment Delete Authorship                                                                                | Accepted                                               | 2026-08-09 |
 | [0013](0013-invitation-email-verification.md)          | Invitation-Acceptance Email Verification                                                                 | Accepted                                               | 2026-08-10 |
-| [0014](0014-dual-licensing-cla.md)                     | Dual Licensing and a Contributor License Agreement                                                       | Accepted (route suspended by 0015)                     | 2026-08-11 |
-| [0015](0015-no-external-contributions.md)              | No External Contributions; Legal Spend Deferred                                                          | Accepted                                               | 2026-08-12 |
+| [0014](0014-dual-licensing-cla.md)                     | Dual Licensing and a Contributor License Agreement                                                       | Superseded by 0028                                     | 2026-08-11 |
+| [0015](0015-no-external-contributions.md)              | No External Contributions; Legal Spend Deferred                                                          | Superseded by 0028                                     | 2026-08-12 |
 | [0016](0016-foreign-key-violation-status.md)           | Foreign-Key Violations Map to 409, Not 422                                                               | Accepted                                               | 2026-08-12 |
 | [0017](0017-partial-indexes-outside-prisma-schema.md)  | Partial Indexes Live in Migrations, Guarded by Tests                                                     | Accepted                                               | 2026-08-12 |
 | [0018](0018-localization-strategy.md)                  | Localization Strategy: next-intl Without URL Routing                                                     | Accepted                                               | 2026-08-12 |
@@ -44,6 +44,8 @@ debate. These are intentionally short and factual, not design documents.
 | [0024](0024-attachment-kinds-and-serving-policy.md)    | Attachment Kinds and Serving Policy: FILE or LINK, One Size Number in Two Layers, Inline Only for Images | Accepted                                               | 2026-08-15 |
 | [0025](0025-trello-import-mapping.md)                  | Trello Import Mapping: Nothing Is Guessed, Everything Missing Is Counted                                 | Accepted                                               | 2026-08-15 |
 | [0026](0026-account-deletion-anonymisation.md)         | Account Deletion: Anonymise the User Row, Decide the Owned Workspace in the Flow                         | Accepted                                               | 2026-08-15 |
+| [0027](0027-attachment-quotas.md)                      | Attachment Storage Quotas: Soft Byte Ceilings per Workspace and per Instance                             | Accepted                                               | 2026-08-18 |
+| [0028](0028-open-contributions-hosted-service.md)      | Open Contributions Under AGPL-3.0, No CLA; Revenue Only From a Hosted Service                            | Accepted (supersedes 0014, 0015)                       | 2026-08-21 |
 
 A status can later change to **Superseded**, with a link to the ADR that
 replaces it (e.g. `**Status:** Superseded by [0012](0012-....md)`).

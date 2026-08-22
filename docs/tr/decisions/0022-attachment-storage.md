@@ -9,7 +9,7 @@
 
 Kurul insanlara bunu yapamadığını, üstelik nedenini de söyleyerek anlatıyor. `README.md`,
 ürünün `v0.1.0`'da olmadığı şeyler arasında "no task attachments" satırını taşıyor ve
-[roadmap.md — Beyond MVP](../roadmap.md#beyond-mvp)'ye işaret ediyor; oradaki kayıt
+[ROADMAP.md — Beyond MVP](../../../ROADMAP.md#beyond-mvp)'ye işaret ediyor; oradaki kayıt
 `Task attachments — Needs an object-storage decision (ADR)` diyor.
 [tech-stack.md](../tech-stack.md) aynı şeyi öbür taraftan söylüyor: "File attachments are out of
 MVP scope. When added, pick an S3-compatible store." Bu doküman ikisinin de beklediği karardır.
@@ -138,7 +138,7 @@ set edilmemiş bırakır, bu da `WorkspaceGuard`'ın üyeliği kontrol edemeden 
 dolayısıyla `@WorkspaceScoped()` kullanılamaz hale gelir ve tenant kontrolü
 `workspaceMember.findUnique`'in el yazımı bir kopyasına dönüşür — attachment varlığının
 sızmasını engelleyen 404-yerine-403 kuralı dahil. Ayrıca iptal mekanizması yoktur: çıkarılmış bir
-üyenin oturumu beş dakikalık cookie cache'i içinde çalışmayı bırakır, oysa dağıtılmış bir imzalı
+üyenin oturumu 60 saniyelik cookie cache'i içinde çalışmayı bırakır, oysa dağıtılmış bir imzalı
 URL TTL'i dolana kadar geçerli kalır. Yayınlanan imajın topolojisinde — tek origin, `/api` yolu,
 `SameSite=Lax` — çerezler `<img src="/api/…">` ve `<a download>` ile birlikte gider, yani imzalı
 URL'in var olma sebebi olan avantaj zaten gereksizdir.

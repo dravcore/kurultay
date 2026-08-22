@@ -1,7 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import { uuidv7 } from 'uuidv7';
-import { ActivityType, AttachmentKind, SocketEvents } from '@kurul/shared-types';
+import {
+  ActivityType,
+  ATTACHMENT_QUOTA_ERROR,
+  AttachmentKind,
+  SocketEvents,
+} from '@kurul/shared-types';
 import type { AttachmentDto } from '@kurul/shared-types';
+import type { Prisma } from '../generated/prisma';
 import { ActivityService } from '../activity/activity.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -134,6 +145,11 @@ export class AttachmentService {
     // `transformException` passes through untouched.
     const mimeType = await assertAllowedMimeType(file.buffer, file.mimetype);
 
+    // Quota after the sniff, not before: a refused type is refused whatever the quota says, and
+    // the sniff is CPU-local while this costs up to two aggregate queries. Still ahead of the
+    // byte write, so an over-quota upload never touches the disk it is being kept off of.
+    await this.assertWithinQuota(workspaceId, file.buffer.length);
+
     // The id is generated here rather than left to `@default(uuid(7))` because the storage key
     // is derived from it and the bytes are written first (plan decision D6). `uuidv7` is already
     // a dependency (`auth/auth.ts`, `common/logging/request-id.ts`).
@@ -239,6 +255,63 @@ export class AttachmentService {
       throw new BadRequestException('A link attachment needs an http or https URL');
     }
     return parsed.toString();
+  }
+
+  /**
+   * The storage quotas, checked before any byte is written (SEC-02 / ADR 0027).
+   *
+   * Both ceilings are **soft**: this is a check-then-write, so N concurrent uploads that each
+   * pass the check can each land, overshooting the quota by at most one file apiece — bounded
+   * by `ATTACHMENT_MAX_BYTES` per request. That race is accepted in the ADR rather than closed
+   * with a lock; what a quota defends against is unbounded disk consumption, and the overshoot
+   * is bounded.
+   *
+   * The ceiling is inclusive — a file that fills the quota exactly is accepted — and only FILE
+   * rows count: a LINK stores no bytes, so it spends nothing. `0` (the explicit opt-out; the
+   * defaults are finite since ADR 0027's 2026-08-21 update) disables a ceiling entirely, in
+   * which case this method issues no query at all.
+   *
+   * The 413 carries `error: ATTACHMENT_QUOTA_ERROR` so a client can tell it from the per-file
+   * size limit's 413 without reading `message` — the field `docs/api-conventions.md#errors`
+   * says to branch on. The messages deliberately avoid multer's error-string constants
+   * (`File too large`, …), which `transformException` matches on (ADR 0022).
+   */
+  private async assertWithinQuota(workspaceId: string, incomingBytes: number): Promise<void> {
+    const workspaceQuota = this.storage.workspaceQuotaBytes;
+    const instanceQuota = this.storage.instanceQuotaBytes;
+
+    if (workspaceQuota > 0) {
+      const used = await this.storedFileBytes({ task: { board: { workspaceId } } });
+      if (used + incomingBytes > workspaceQuota) {
+        throw new PayloadTooLargeException({
+          message: 'This file does not fit in the workspace attachment storage quota',
+          error: ATTACHMENT_QUOTA_ERROR,
+        });
+      }
+    }
+    if (instanceQuota > 0) {
+      const used = await this.storedFileBytes({});
+      if (used + incomingBytes > instanceQuota) {
+        throw new PayloadTooLargeException({
+          message: "This file does not fit in the instance's attachment storage quota",
+          error: ATTACHMENT_QUOTA_ERROR,
+        });
+      }
+    }
+  }
+
+  /**
+   * Bytes currently stored for FILE rows matching `scope` — a `SUM` over `size`, measured
+   * against live rows. A detached attachment frees its quota immediately even though the sweep
+   * removes its bytes later (ADR 0022): the quota governs what the database owns, and the
+   * sweep's grace window is the disk lagging that answer, not a second bookkeeping.
+   */
+  private async storedFileBytes(scope: Prisma.AttachmentWhereInput): Promise<number> {
+    const { _sum } = await this.prisma.attachment.aggregate({
+      _sum: { size: true },
+      where: { kind: AttachmentKind.File, ...scope },
+    });
+    return _sum.size ?? 0;
   }
 
   private async requireAttachment(

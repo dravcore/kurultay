@@ -1,9 +1,15 @@
 import {
   BadRequestException,
   NotFoundException,
+  PayloadTooLargeException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
-import { ActivityType, AttachmentKind, SocketEvents } from '@kurul/shared-types';
+import {
+  ActivityType,
+  ATTACHMENT_QUOTA_ERROR,
+  AttachmentKind,
+  SocketEvents,
+} from '@kurul/shared-types';
 import { ActivityService } from '../activity/activity.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -16,7 +22,7 @@ const ACTOR_ID = '0198e2c0-9a1b-7f04-8c3d-2b5e7a9c1d54';
 const ATTACHMENT_ID = '0198e2c0-9a1b-7f04-8c3d-2b5e7a9c1d60';
 const BOARD_ID = '0198e2c0-9a1b-7f04-8c3d-2b5e7a9c1d4f';
 
-function build() {
+function build(quotas: { workspaceQuotaBytes?: number; instanceQuotaBytes?: number } = {}) {
   const prisma = {
     $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(prisma)),
     task: {
@@ -27,6 +33,7 @@ function build() {
       findFirst: jest.fn(),
       create: jest.fn(),
       deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { size: null } }),
     },
   } as unknown as PrismaService;
   const activity = {
@@ -36,6 +43,8 @@ function build() {
   const storage = {
     persistsFiles: true,
     maxBytes: 26_214_400,
+    workspaceQuotaBytes: quotas.workspaceQuotaBytes ?? 0,
+    instanceQuotaBytes: quotas.instanceQuotaBytes ?? 0,
     write: jest.fn().mockResolvedValue(undefined),
     remove: jest.fn().mockResolvedValue(undefined),
   } as unknown as StorageService;
@@ -415,6 +424,82 @@ describe('AttachmentService.createFile', () => {
 
     expect(storage.write).not.toHaveBeenCalled();
     expect(prisma.attachment.create).not.toHaveBeenCalled();
+  });
+
+  describe('storage quotas (SEC-02 / ADR 0027)', () => {
+    it('refuses a file the workspace quota cannot hold, before a byte is written', async () => {
+      const { service, prisma, storage } = build({ workspaceQuotaBytes: PNG.length + 10 });
+      (prisma.attachment.aggregate as jest.Mock).mockResolvedValue({ _sum: { size: 11 } });
+
+      const failure = await service
+        .createFile(WORKSPACE_ID, TASK_ID, ACTOR_ID, file())
+        .then(() => null)
+        .catch((caught: PayloadTooLargeException) => caught);
+
+      expect(failure).toBeInstanceOf(PayloadTooLargeException);
+      // The discriminator a client branches on: same 413 as the per-file limit, different
+      // `error` (docs/api-conventions.md#errors).
+      expect((failure?.getResponse() as { error: string }).error).toBe(ATTACHMENT_QUOTA_ERROR);
+      expect(storage.write).not.toHaveBeenCalled();
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+
+      // Only FILE rows spend quota, and only this workspace's — a LINK stores no bytes.
+      expect(prisma.attachment.aggregate).toHaveBeenCalledWith({
+        _sum: { size: true },
+        where: { kind: AttachmentKind.File, task: { board: { workspaceId: WORKSPACE_ID } } },
+      });
+    });
+
+    it('accepts a file that fills the workspace quota exactly — the ceiling is inclusive', async () => {
+      const { service, prisma } = build({ workspaceQuotaBytes: PNG.length + 10 });
+      (prisma.attachment.aggregate as jest.Mock).mockResolvedValue({ _sum: { size: 10 } });
+      (prisma.attachment.create as jest.Mock).mockResolvedValue(fileRow());
+
+      await expect(
+        service.createFile(WORKSPACE_ID, TASK_ID, ACTOR_ID, file()),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses on the instance quota, summed with no workspace scope', async () => {
+      const { service, prisma, storage } = build({ instanceQuotaBytes: PNG.length });
+      (prisma.attachment.aggregate as jest.Mock).mockResolvedValue({ _sum: { size: 1 } });
+
+      const failure = await service
+        .createFile(WORKSPACE_ID, TASK_ID, ACTOR_ID, file())
+        .then(() => null)
+        .catch((caught: PayloadTooLargeException) => caught);
+
+      expect(failure).toBeInstanceOf(PayloadTooLargeException);
+      expect((failure?.getResponse() as { error: string }).error).toBe(ATTACHMENT_QUOTA_ERROR);
+      expect(storage.write).not.toHaveBeenCalled();
+      expect(prisma.attachment.aggregate).toHaveBeenCalledWith({
+        _sum: { size: true },
+        where: { kind: AttachmentKind.File },
+      });
+    });
+
+    it('issues no aggregate query at all when both quotas are opted out with 0', async () => {
+      // `0` must cost nothing: an instance that lifts both ceilings keeps the pre-quota upload
+      // path, query for query.
+      const { service, prisma } = build();
+      (prisma.attachment.create as jest.Mock).mockResolvedValue(fileRow());
+
+      await service.createFile(WORKSPACE_ID, TASK_ID, ACTOR_ID, file());
+
+      expect(prisma.attachment.aggregate).not.toHaveBeenCalled();
+    });
+
+    it('treats an empty workspace as holding zero bytes, not as unmeasurable', async () => {
+      // Prisma's `_sum.size` is `null` over no rows; a `NaN` here would make every comparison
+      // false and quietly disable the quota.
+      const { service, prisma, storage } = build({ workspaceQuotaBytes: 1 });
+      (prisma.attachment.aggregate as jest.Mock).mockResolvedValue({ _sum: { size: null } });
+
+      await expect(service.createFile(WORKSPACE_ID, TASK_ID, ACTOR_ID, file())).rejects.toThrow(
+        PayloadTooLargeException,
+      );
+      expect(storage.write).not.toHaveBeenCalled();
+    });
   });
 
   it('404s for a task in another workspace before a byte is written', async () => {

@@ -142,10 +142,13 @@ register UI'ının bizim yazmamız gerektiğini unutma.
 
 ### E-posta — SMTP üzerinden nodemailer
 
-Kurul bugüne kadar tek bir sınıf e-posta gönderiyor: `better-auth`'un sağlamlaştırılmış
+Kurul iki sınıf e-posta gönderiyor: işlemsel olanlar (`better-auth`'un sağlamlaştırılmış
 davet-kabul kontrolünün bir davet edilenin workspace'e katılmasına izin vermeden önce
-ihtiyaç duyduğu doğrulama linki (bkz.
-[`decisions/0013-invitation-email-verification.md`](decisions/0013-invitation-email-verification.md)).
+ihtiyaç duyduğu doğrulama linki, bkz.
+[`decisions/0013-invitation-email-verification.md`](decisions/0013-invitation-email-verification.md),
+ve davetin kendisi) ve bildirim e-postaları (atama, mention ve due-soon; her `Notification`
+satırı için bir mesaj, `/me` üzerindeki kullanıcı başına anahtarın arkasında). İkisi de aynı
+modülden ve aynı değişkenlerden geçer.
 `nodemailer` düz SMTP konuşur, yalnızca `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` /
 `SMTP_PASSWORD` / `SMTP_SECURE` / `MAIL_FROM` üzerinden yapılandırılır — sağlayıcı SDK'sı yok,
 dolayısıyla self-hoster'lar yeni bir vendor hesabı oluşturmak yerine zaten çalıştırdıkları
@@ -167,7 +170,7 @@ asla gerçek mail göndermemesi için lokal bir SMTP catch-all olarak
 `User.locale → locale cookie → Accept-Language → 'en'`
 ([ADR 0018](decisions/0018-localization-strategy.md)); **Ayarlar → Dil** tercih veya
 “Tarayıcımı izle” seçebilir. Katalog hâlâ yalnızca İngilizce — ek UI dil paketleri
-[MVP ötesi](roadmap.md#mvp-ötesi).
+[MVP ötesi](../../ROADMAP.md#beyond-mvp).
 
 ### Dosya yükleme — `multer` + `file-type`
 
@@ -221,7 +224,7 @@ Mimari ve veri modelleme için incelemeye değer projeler:
 
 ## 5. Karar kayıtları
 
-Stack ve ürün ADR'leri [decisions/README.md](decisions/README.md) indeksinde (0001–0019).
+Stack ve ürün ADR'leri [decisions/README.md](decisions/README.md) indeksinde (0001-0028).
 Tabloyu burada çoğaltmak yerine oradan başlayın.
 
-İlgili: [architecture.md](architecture.md) · [../archive/project-skeleton.md](../archive/project-skeleton.md) (tarihsel Faz 1 iskeleti)
+İlgili: [architecture.md](architecture.md)

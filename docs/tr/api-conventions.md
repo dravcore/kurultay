@@ -167,10 +167,10 @@ GET   /health/ready          # readiness, kimliksiz
 GET   /config                # instance yetenekleri; oturum açmış her çağıran
 POST  /auth/*                # Better Auth handler'ları
 GET   /me                    # mevcut kullanıcı profili
-PATCH /me                    # kendi profili; bugün yalnızca arayüz dili
+PATCH /me                    # kendi profili; arayüz dili ve bildirim e-postası anahtarı
 GET   /me/deletion-preview   # bu hesabı silmek neye yol açar
 DELETE /me                   # bu hesabı sil (anonimleştirir)
-GET   /instance/activation                     # aktivasyon hunisi; yalnız INSTANCE_ADMIN_EMAILS
+GET   /instance/activation                     # aktivasyon hunisi; yalnız INSTANCE_ADMIN_EMAILS (doğrulanmış e-posta gerekli)
 GET   /instance/users/:userId/deletion-preview # aynı önizleme, operatör için
 DELETE /instance/users/:userId                 # bir başkası adına silme talebini uygula
 ```
@@ -187,7 +187,10 @@ healthcheck'tir, bir istemci değil.
 `PATCH /me` workspace'e scope'lu değildir ve rol kontrolü yoktur: özne çağıranın kendisidir,
 dolayısıyla yetkilendirmenin tamamı session guard'ıdır. `User.locale`'in yazıldığı tek yer de
 burasıdır — bkz.
-[decisions/0018-localization-strategy.md](decisions/0018-localization-strategy.md).
+[decisions/0018-localization-strategy.md](decisions/0018-localization-strategy.md) — ve
+`User.emailNotifications`'ın da: yeni hesapta `true` olan tek bir boolean, atama, mention ve
+due-soon e-postalarını birlikte kapatır. Uygulama içi bildirimler etkilenmez; `mailEnabled`'ı
+`false` olan bir instance'ta bu bayrak hiçbir şeyi değiştirmez.
 
 `DELETE /me` çağıranın hesabını siler ve bu API'de eksik bir isteğe varsayılan seçerek değil,
 reddederek karşılık veren tek route'tur. Gövde `confirmEmail` (hesabın kendi adresi) ve
@@ -197,7 +200,7 @@ reddederek karşılık veren tek route'tur. Gövde `confirmEmail` (hesabın kend
 `403`'tür; o workspace'te olmayan bir devir hedefi `404`'tür — her workspace route'unun verdiği
 aynı opaklık. `GET /me/deletion-preview`, istemcinin o gövdeyi kurmak için okuduğu şeydir.
 `DELETE /instance/users/:userId` aynı işlemin bir instance operatörü tarafından yapılan hâlidir —
-`INSTANCE_ADMIN_EMAILS` çağıranı adıyla saymıyorsa `403`, ki taze bir kurulumda varsayılan budur.
+`INSTANCE_ADMIN_EMAILS` çağıranı adıyla saymıyorsa ya da e-postası doğrulanmamışsa `403`, ki taze bir kurulumda varsayılan budur.
 Hesap satırı silinmez, anonimleştirilir; bkz.
 [decisions/0026-account-deletion-anonymisation.md](decisions/0026-account-deletion-anonymisation.md).
 
@@ -215,10 +218,10 @@ burada gizlenecek bir şey yok — route, AGPL bir projenin kaynak kodunda duruy
 { "mailEnabled": true, "attachmentsEnabled": true }
 ```
 
-| Alan                 | Anlamı                                                                                                                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `mailEnabled`        | SMTP host'u yapılandırılmamışsa `false` — her mesaj API log'una yazılır ve hiçbir yere teslim edilmez; kimse adresini doğrulayamaz, dolayısıyla daveti kabul edemez                        |
-| `attachmentsEnabled` | `STORAGE_PATH` tanımsızsa `false` — bu deployment hiç dosya saklamaz ve web arayüzü yükleme kontrolünü gizler. **Bağlantı ekleri buna bağlı değildir** — bir bağlantı hiç depolama istemez |
+| Alan                 | Anlamı                                                                                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mailEnabled`        | SMTP host'u yapılandırılmamışsa `false` — her mesaj API log'una yazılır ve hiçbir yere teslim edilmez; kimse adresini doğrulayamaz, dolayısıyla daveti kabul edemez, ve `User.emailNotifications` ne derse desin bildirim e-postası kapalıdır |
+| `attachmentsEnabled` | `STORAGE_PATH` tanımsızsa `false` — bu deployment hiç dosya saklamaz ve web arayüzü yükleme kontrolünü gizler. **Bağlantı ekleri buna bağlı değildir** — bir bağlantı hiç depolama istemez                                                    |
 
 Bu ucun biçimini üç kural tutar ve her biri başka türlü de karar verilebilecek bir seçimdir:
 
@@ -291,21 +294,21 @@ gerçekten operasyon olduğu yerde kullanılır (örneğin bir column'un tamamı
 sıralamak). Bir alanı atlayan bir `PATCH` onu dokunulmamış bırakır; açıkça `null` göndermek
 nullable bir alanı temizler.
 
-| Status                       | Ne zaman                                                                                                                             |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `200 OK`                     | Başarılı okuma, güncelleme veya aksiyon                                                                                              |
-| `201 Created`                | Kaynak oluşturuldu; body oluşturulan kaynaktır                                                                                       |
-| `204 No Content`             | Başarılı silme; boş body                                                                                                             |
-| `400 Bad Request`            | Bozuk request veya validation hatası                                                                                                 |
-| `401 Unauthorized`           | Eksik veya geçersiz session                                                                                                          |
-| `403 Forbidden`              | Kimlikli, workspace üyesi, ama rol yetersiz                                                                                          |
-| `404 Not Found`              | Kaynak yok **veya** başka bir workspace'e ait                                                                                        |
-| `409 Conflict`               | Benzersizlik ihlali (yinelenen slug), veya çakışan bir eşzamanlı değişiklik                                                          |
-| `413 Payload Too Large`      | JSON/form body `REQUEST_BODY_MAX_BYTES`'ı, bir yükleme `ATTACHMENT_MAX_BYTES`'ı, ya da bir import `TRELLO_IMPORT_MAX_BYTES`'ı aşıyor |
-| `415 Unsupported Media Type` | Dosyanın **magic byte**'ları allowlist'te değil. Beyan edilen `Content-Type` ve uzantı kanıt sayılmaz, hiç okunmaz                   |
-| `422 Unprocessable Entity`   | İyi biçimlendirilmiş ama semantik olarak geçersiz (örn. bir task'ı başka bir board'daki bir column'a taşımak)                        |
-| `429 Too Many Requests`      | Rate limit uygulandı                                                                                                                 |
-| `500 Internal Server Error`  | Ele alınmamış hata. Asla bir stack trace sızdırmaz.                                                                                  |
+| Status                       | Ne zaman                                                                                                                                                                                                                                                                      |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `200 OK`                     | Başarılı okuma, güncelleme veya aksiyon                                                                                                                                                                                                                                       |
+| `201 Created`                | Kaynak oluşturuldu; body oluşturulan kaynaktır                                                                                                                                                                                                                                |
+| `204 No Content`             | Başarılı silme; boş body                                                                                                                                                                                                                                                      |
+| `400 Bad Request`            | Bozuk request veya validation hatası                                                                                                                                                                                                                                          |
+| `401 Unauthorized`           | Eksik veya geçersiz session                                                                                                                                                                                                                                                   |
+| `403 Forbidden`              | Kimlikli, workspace üyesi, ama rol yetersiz                                                                                                                                                                                                                                   |
+| `404 Not Found`              | Kaynak yok **veya** başka bir workspace'e ait                                                                                                                                                                                                                                 |
+| `409 Conflict`               | Benzersizlik ihlali (yinelenen slug), veya çakışan bir eşzamanlı değişiklik                                                                                                                                                                                                   |
+| `413 Payload Too Large`      | JSON/form body `REQUEST_BODY_MAX_BYTES`'ı, bir yükleme `ATTACHMENT_MAX_BYTES`'ı aşıyor ya da bir depolama kotasını aşacak (hangisi olduğunu `error` söyler — bkz. [Dosya yükleme ve indirme](#dosya-yükleme-ve-indirme)), ya da bir import `TRELLO_IMPORT_MAX_BYTES`'ı aşıyor |
+| `415 Unsupported Media Type` | Dosyanın **magic byte**'ları allowlist'te değil. Beyan edilen `Content-Type` ve uzantı kanıt sayılmaz, hiç okunmaz                                                                                                                                                            |
+| `422 Unprocessable Entity`   | İyi biçimlendirilmiş ama semantik olarak geçersiz (örn. bir task'ı başka bir board'daki bir column'a taşımak)                                                                                                                                                                 |
+| `429 Too Many Requests`      | Rate limit uygulandı: bir route'un istek bütçesi ya da yükleme route'unun IP başına bayt bütçesi aşıldı (hangisi olduğunu `error` söyler, bkz. [Rate limiting](#rate-limiting))                                                                                               |
+| `500 Internal Server Error`  | Ele alınmamış hata. Asla bir stack trace sızdırmaz.                                                                                                                                                                                                                           |
 
 **Cross-workspace erişim `403` değil `404` döner.** Bir `403`, kaynağın var olduğunu
 doğrulardı, ki bu tenant sınırının ötesine bilgi sızdırır. `403`, rolü çok düşük meşru bir
@@ -427,6 +430,17 @@ multipart zarfı dosyanın üstüne birkaç yüz byte ekler. İkisi de `413` dö
 döndüğünü cevabın gövdesi söyler: API'nin `413`'ü yukarıdaki hata zarfıdır, proxy'ninki hiç JSON
 değildir. Hangi sayının değiştirileceği ve aralarındaki sıralama kuralı:
 [self-hosting.md](self-hosting.md#kendi-reverse-proxynizi-kullanmak).
+
+**Depolama kotaları da `413` döner, ama kendi `error`'larıyla.**
+`ATTACHMENT_WORKSPACE_QUOTA_BYTES` ve `ATTACHMENT_INSTANCE_QUOTA_BYTES`, saklanan FILE eklerinin
+toplam boyutuna tavan koyar; ayarlanmadıklarında 2 GiB ve 20 GiB'dir, yazılı bir `0` ilgili
+tavanı kaldırır ([ADR 0027](decisions/0027-attachment-quotas.md), 2026-08-21'de güncellendi).
+Byte'ları toplamı tavanın ötesine itecek bir yükleme, hiçbir şey yazılmadan reddedilir. Zarf `error: "Attachment Quota Exceeded"` taşır; dosya başına limitinki
+ise `"Payload Too Large"` taşır — durum kodu tek başına dosyayı mı küçültmek yoksa yer mi açmak
+gerektiğini söyleyemez ve istemciler `statusCode` ile `error` üzerinden dallanır, asla `message`
+üzerinden değil (bkz. [Hatalar](#hatalar)). Kotayı tam dolduran dosya kabul edilir; tavan, dosya
+başına olan gibi kapsayıcıdır. LINK ekleri byte saklamaz: ne kotadan düşerler ne de dolu bir
+kota tarafından reddedilirler.
 
 **İndirme.** `GET .../attachments/:attachmentId/content` byte'ları **sniff edilmiş** medya tipiyle
 (asla istemcinin yüklemede beyan ettiğiyle değil), `Content-Length` ve `Content-Disposition` ile
@@ -667,23 +681,37 @@ istekler `X-RateLimit-Limit`, `X-RateLimit-Remaining` ve `X-RateLimit-Reset` ta�
 Bütçeler **client IP'si ve route başına**, kayan bir dakikalık pencerede sayılır — yoğun
 çalışan bir endpoint asla başka bir endpoint'in payını harcamaz.
 
-| Endpoint                                       | Bütçe    | Neden                                                                            |
-| ---------------------------------------------- | -------- | -------------------------------------------------------------------------------- |
-| Aşağıda sayılmayan her endpoint                | 100 / dk | Bir insanın üreteceğinin çok üstünde; script'i sınırlar                          |
-| `POST /workspaces/:workspaceId/invitations`    | 10 / dk  | Her çağrı, adresini çağıranın seçtiği bir mesajı SMTP relay'ine verir            |
-| `GET .../boards/:boardId/tasks?q=`             | 30 / dk  | `q=` bir trigram taramasıdır; aynı route `q=` olmadan varsayılanda kalır         |
-| `POST .../tasks/:taskId/attachments`           | 20 / dk  | Tek bir isteğin `ATTACHMENT_MAX_BYTES` kadar diske mal olabildiği tek uç         |
-| `POST /workspaces/:workspaceId/imports/trello` | 3 / dk   | Heap'e ayrıştırılan 20 MiB'lık gövde, ardından tek transaction'da binlerce satır |
-| `GET .../attachments/:attachmentId/content`    | 300 / dk | Varsayılanın _üstünde_: on görsel ekli bir panel açılışta on istek üretir        |
-| `/auth/sign-in*`, `/auth/sign-up*`             | 3 / 10sn | Better Auth'un kimlik endpoint'leri için yerleşik kuralı                         |
-| Diğer `/auth/*`                                | 100 / dk | Better Auth'un kendi limiter'ı — `/auth/*` Nest router'ını atlar (ADR 0004)      |
-| `GET /health`, `GET /health/ready`             | muaf     | Throttle edilen bir probe, sağlıklı bir API'yi çökmüş gösterir                   |
+| Endpoint                                       | Bütçe        | Neden                                                                                |
+| ---------------------------------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| Aşağıda sayılmayan her endpoint                | 100 / dk     | Bir insanın üreteceğinin çok üstünde; script'i sınırlar                              |
+| `POST /workspaces/:workspaceId/invitations`    | 10 / dk      | Her çağrı, adresini çağıranın seçtiği bir mesajı SMTP relay'ine verir                |
+| `GET .../boards/:boardId/tasks?q=`             | 30 / dk      | `q=` bir trigram taramasıdır; aynı route `q=` olmadan varsayılanda kalır             |
+| `POST .../tasks/:taskId/attachments`           | 20 / dk      | Tek bir isteğin `ATTACHMENT_MAX_BYTES` kadar diske mal olabildiği tek uç             |
+| `POST .../tasks/:taskId/attachments` (bayt)    | 256 MiB / dk | `ATTACHMENT_UPLOAD_BYTES_PER_MINUTE`: aynı route'un bir de bayt bütçesi var, aşağıda |
+| `POST /workspaces/:workspaceId/imports/trello` | 3 / dk       | Heap'e ayrıştırılan 20 MiB'lık gövde, ardından tek transaction'da binlerce satır     |
+| `GET .../attachments/:attachmentId/content`    | 300 / dk     | Varsayılanın _üstünde_: on görsel ekli bir panel açılışta on istek üretir            |
+| `/auth/sign-in*`, `/auth/sign-up*`             | 3 / 10sn     | Better Auth'un kimlik endpoint'leri için yerleşik kuralı                             |
+| Diğer `/auth/*`                                | 100 / dk     | Better Auth'un kendi limiter'ı — `/auth/*` Nest router'ını atlar (ADR 0004)          |
+| `GET /health`, `GET /health/ready`             | muaf         | Throttle edilen bir probe, sağlıklı bir API'yi çökmüş gösterir                       |
 
-**Yükleme bütçesi yeterliymiş gibi sunulmuyor, yetersiz diye adlandırılıyor.** Throttler IP
-başına, route başına istek sayar; bu bir yükleme için iki kez yanlış birimdir: yirmi 25 MiB'lık
-istek ile yirmi 10 kB'lık istek aynı bütçeyi harcar, ve tek bir NAT arkasındaki ofis tek bir
-kovayı paylaşır. Gerçek tavan, dosya başına boyut limiti artı henüz var olmayan bir workspace
-kotasıdır (ADR 0022). **Import bütçesi de aynı dürüstlük şerhi altında ve tam da bu yüzden daha
+**Yükleme istek bütçesi yeterliymiş gibi sunulmuyor, yetersiz diye adlandırılıyor.** Throttler
+IP başına, route başına istek sayar; bu bir yükleme için iki kez yanlış birimdir: yirmi 25
+MiB'lık istek ile yirmi 10 kB'lık istek aynı bütçeyi harcar, ve tek bir NAT arkasındaki ofis tek
+bir kovayı paylaşır. Eksik olan birim bayttı ve 2026-08-21'den beri route onu da düşüyor:
+`ATTACHMENT_UPLOAD_BYTES_PER_MINUTE` (varsayılan `268435456`, 256 MiB, yaklaşık on tam boy
+yükleme; `0` kapatır) bir istemci IP'sinin sabit bir dakikada route'a gönderebileceği en fazla
+bayttır. Düşülen miktar isteğin `Content-Length`'idir ve gövde okunmadan önce alınır; reddedilen
+istek API'ye heap'e mal olmaz. Uzunluk bildirmeyen bir multipart istek `ATTACHMENT_MAX_BYTES`
+kadar düşülür; JSON gövde (hiçbir şey saklamayan bir LINK) hiç düşülmez. Bütçe aşımı, istek
+throttle'ının `429`'u `"Too Many Requests"` taşırken `error: "Upload Budget Exceeded"` taşıyan
+bir `429`'dur; yanında dakikanın kalanını söyleyen `Retry-After` vardır. İstemciler `statusCode`
+ile `error` üzerinden dallanır, asla `message` üzerinden değil ([Hatalar](#hatalar)). Bütçe,
+istek throttle'ıyla aynı istemci IP'sine göre anahtarlanır, `RATE_LIMIT_ENABLED`'a uyar,
+sayaçlarını `REDIS_URL` ayarlıyken Redis'te tutar ve Redis hatasında tıpkı aşağıdaki `/auth/*`
+limiter'ı gibi süreç başına sayaca düşer. NAT şerhi hâlâ geçerlidir. Toplamı sınırlayan şey ise
+dosya başına boyut limiti artı [Dosya yükleme ve indirme](#dosya-yükleme-ve-indirme)
+bölümünde anlatılan workspace başına ve instance başına kotalardır ([ADR 0027](decisions/0027-attachment-quotas.md)).
+**Import bütçesi de aynı dürüstlük şerhi altında ve tam da bu yüzden daha
 düşük ayarlı:** üç istek, yükleme bütçesinin epey altında, çünkü tek bir import isteği 20 MiB'lık
 bir ayrıştırma artı bu API'nin açtığı en uzun ömürlü yazma transaction'ı demek — ve istek sayan
 bir throttler dört kartlık bir board ile beş yüz kartlık bir board'u ayırt edemez.
@@ -693,6 +721,13 @@ sunulur, dolayısıyla `ThrottlerGuard` onu hiç görmez ve işi Better Auth'un 
 yapar. Better Auth'un sayaçları `REDIS_URL` tanımlıysa Redis'te tutulur — instance'lar arası
 paylaşılır, restart'ı atlatır — değilse process belleğinde, ki bu da desteklenen tek-instance
 konfigürasyonudur. Nest throttler'ının sayaçları her zaman instance başınadır.
+
+Redis tanımlıyken bir çağrı ortasında başarısız olursa — `REDIS_URL` boş bırakılmış olması
+değil, bir outage — `/auth/*` limiter'ı sınırsız açılmaz. Her API process'i, Redis tekrar
+cevap verene kadar aynı kuralı uygulayan kendi in-memory sayacına düşer; iniş ve çıkış anları
+error seviyesinde loglanır. Bu fallback paylaşılan limit değil, process başına bir tabandır:
+N replica arkasında outage sırasındaki etkin tavan, kuralın limiti değil, kuralın limiti çarpı
+N'dir — yine de her isteğe izin vermekten farklı olarak sınırlıdır.
 
 İki limiter da aynı çözümlenmiş client IP'sini kullanır, tek bir ayarla sürülür:
 `TRUST_PROXY` (varsayılan boş/`false`). Kapalıyken uygulama, ham TCP bağlantısının ötesinde
@@ -713,9 +748,9 @@ bir header'a yönlendirir. `TRUST_PROXY=true`, hiçbir doğrulama yapmadan ileti
 tamamına güvenir ve yalnızca API proxy dışında erişilemezken kullanılmalıdır — doğrudan
 expose edilen bir kurulumda her saldırgana sınırsız bütçe verir.
 
-`RATE_LIMIT_ENABLED=false` her iki limiter'ı da kapatır. Tek bir adresten route başına
-yüzlerce istek süren entegrasyon testleri için vardır; bunu ayarlayan bir deployment'ın
-brute-force tavanı yoktur.
+`RATE_LIMIT_ENABLED=false` her iki limiter'ı ve yükleme bayt bütçesini kapatır. Tek bir adresten
+route başına yüzlerce istek süren entegrasyon testleri için vardır; bunu ayarlayan bir
+deployment'ın brute-force tavanı yoktur.
 
 ## Pagination
 
@@ -933,8 +968,7 @@ ihtiyaç duyulduğunda karar verilecektir.
 
 ## Ayrıca bakınız
 
-- [architecture.md](architecture.md) — modül haritası, socket kontratı
+- [architecture.md](architecture.md) — modül haritası, veri modeli, socket kontratı
 - [coding-standards.md](coding-standards.md) — DTO'lar, validation, modül sınırları
 - [testing.md](testing.md) — endpoint testlerinin neyi assert ettiği
 - [git-strategy.md](git-strategy.md) — SemVer ve changelog politikası
-- [project-skeleton.md](project-skeleton.md) — bu kaynakların eşlendiği veri modeli

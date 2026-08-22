@@ -593,4 +593,48 @@ describe('Tasks (e2e)', () => {
       .get(`/workspaces/${workspace.id}/boards/${boardId}/tasks?unknown=1`)
       .expect(400);
   });
+
+  // Prisma's `contains` binds the search string as a Postgres `ILIKE` *pattern*, not a
+  // literal — empirically confirmed against Postgres 18 via `@prisma/adapter-pg` (see
+  // `escapeLikePattern`'s doc comment): an unescaped `%`/`_` the user typed keeps its SQL
+  // wildcard meaning, so `q=50%` would also match `"50X done"` and `q=a_b` would also match
+  // `"aXb"`. This proves the search box means what it looks like it means.
+  it('treats % and _ in the search query as literal characters, not SQL wildcards', async () => {
+    const owner = await signUp(app, { name: 'Wildcard Owner' });
+    const workspace = await createWorkspace(owner.agent, 'Wildcards', `wildcards-${Date.now()}`);
+    const { boardId, columns } = await boardWithColumns(owner.agent, workspace.id);
+    const todo = columns.find((column) => column.name === 'To Do')!;
+
+    const percentLiteral = await owner.agent
+      .post(`/workspaces/${workspace.id}/boards/${boardId}/tasks`)
+      .send({ title: '50% done', columnId: todo.id })
+      .expect(201);
+    await owner.agent
+      .post(`/workspaces/${workspace.id}/boards/${boardId}/tasks`)
+      .send({ title: '50X done', columnId: todo.id })
+      .expect(201);
+
+    const underscoreLiteral = await owner.agent
+      .post(`/workspaces/${workspace.id}/boards/${boardId}/tasks`)
+      .send({ title: 'a_b', columnId: todo.id })
+      .expect(201);
+    await owner.agent
+      .post(`/workspaces/${workspace.id}/boards/${boardId}/tasks`)
+      .send({ title: 'aXb', columnId: todo.id })
+      .expect(201);
+
+    const percentSearch = await owner.agent
+      .get(`/workspaces/${workspace.id}/boards/${boardId}/tasks?q=${encodeURIComponent('50%')}`)
+      .expect(200);
+    expect(percentSearch.body.items.map((t: { id: string }) => t.id)).toEqual([
+      percentLiteral.body.id,
+    ]);
+
+    const underscoreSearch = await owner.agent
+      .get(`/workspaces/${workspace.id}/boards/${boardId}/tasks?q=${encodeURIComponent('a_b')}`)
+      .expect(200);
+    expect(underscoreSearch.body.items.map((t: { id: string }) => t.id)).toEqual([
+      underscoreLiteral.body.id,
+    ]);
+  });
 });

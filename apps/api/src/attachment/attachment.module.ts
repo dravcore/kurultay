@@ -2,12 +2,14 @@ import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ActivityModule } from '../activity/activity.module';
+import { UploadBudgetService } from '../common/rate-limit/upload-budget';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { StorageModule } from '../storage/storage.module';
 import { StorageService } from '../storage/storage.service';
 import { AttachmentController } from './attachment.controller';
 import { AttachmentDownloadService } from './attachment-download.service';
 import { AttachmentService } from './attachment.service';
+import { UploadBudgetGuard } from './upload-budget.guard';
 
 @Module({
   imports: [
@@ -78,6 +80,9 @@ import { AttachmentService } from './attachment.service';
     }),
   ],
   controllers: [AttachmentController],
-  providers: [AttachmentService, AttachmentDownloadService],
+  // The budget store is a provider here and not a global one: the upload route is its only
+  // consumer, and the module that owns the route is the one that should own the connection's
+  // lifecycle (`UploadBudgetService.onModuleDestroy`).
+  providers: [AttachmentService, AttachmentDownloadService, UploadBudgetService, UploadBudgetGuard],
 })
 export class AttachmentModule {}

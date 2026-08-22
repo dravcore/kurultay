@@ -61,7 +61,7 @@ lightweight enough for a solo/small-team codebase to maintain.
   is coming for the classic line, so any tuning is ours to own.
 - A `@dnd-kit` bug we cannot work around is the failure mode this decision
   accepts. **Re-evaluation trigger: at Phase 4**
-  ([roadmap.md](../archive/roadmap-mvp-phases.md#phase-4--tasks-and-drag-and-drop)), when the board
+  (the MVP roadmap's Phase 4; its checklist now lives only in git history), when the board
   interaction is actually built, or earlier if such a bug appears or if
   `@dnd-kit/react` reaches 1.0. The migration target is
   `pragmatic-drag-and-drop`, costed at "write collision detection", not at

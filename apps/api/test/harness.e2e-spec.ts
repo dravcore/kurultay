@@ -16,6 +16,11 @@ import { createTestApp } from './helpers/app';
  * `Parse Error: Expected HTTP/, RTSP/ or ICE/` on whichever request lost the race.
  *
  * `createTestApp` therefore binds once. These assertions fail if that ever regresses.
+ *
+ * The last test guards the harness's module resolution instead: `jest-e2e.config.cjs` maps
+ * the workspace packages to their `src`, the same way `jest.config.cjs` does for the unit
+ * suite (see `src/workspace-packages.spec.ts`), so the integration suite can never run against
+ * a missing or stale `dist` under `packages/`.
  */
 describe('E2E harness (e2e)', () => {
   let app: INestApplication<App>;
@@ -50,5 +55,14 @@ describe('E2E harness (e2e)', () => {
     expect(after).toEqual(expect.any(Number));
     // ...and bound to the same port, i.e. it was never torn down and re-listened.
     expect(after).toBe(before);
+  });
+
+  it('resolves the workspace packages to their source, not dist', () => {
+    expect(require.resolve('@kurul/shared-types')).toMatch(
+      /[\\/]packages[\\/]shared-types[\\/]src[\\/]index\.ts$/,
+    );
+    expect(require.resolve('@kurul/auth-access')).toMatch(
+      /[\\/]packages[\\/]auth-access[\\/]src[\\/]index\.ts$/,
+    );
   });
 });

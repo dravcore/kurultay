@@ -44,12 +44,14 @@ describe('Retention cleanup (e2e)', () => {
     await resetDatabase(prisma);
     process.env.NOTIFICATION_RETENTION_DAYS = '90';
     process.env.ACTIVITY_RETENTION_DAYS = '365';
+    process.env.INVITATION_RETENTION_DAYS = '90';
   });
 
   afterEach(() => {
     process.env.CLEANUP_ENABLED = 'false';
     delete process.env.NOTIFICATION_RETENTION_DAYS;
     delete process.env.ACTIVITY_RETENTION_DAYS;
+    delete process.env.INVITATION_RETENTION_DAYS;
   });
 
   async function sweep(now?: Date): Promise<ReturnType<CleanupWorker['runCleanup']>> {
@@ -163,6 +165,32 @@ describe('Retention cleanup (e2e)', () => {
           Date.UTC(createdAt.getUTCFullYear(), createdAt.getUTCMonth(), createdAt.getUTCDate()),
         ),
         createdAt,
+      },
+      select: { id: true },
+    });
+    return row.id;
+  }
+
+  /**
+   * An invitation carrying a real address, in whatever state and of whatever age.
+   *
+   * Written directly rather than through `POST /workspaces/:id/invitations` because that route
+   * can only ever produce a fresh `pending` row: the states this sweep is about are reached by
+   * time passing and by somebody answering, neither of which a test can wait for.
+   */
+  async function insertInvitation(
+    s: Seed,
+    options: { email: string; status: string; createdAt: Date; expiresAt: Date },
+  ): Promise<string> {
+    const row = await prisma.workspaceInvitation.create({
+      data: {
+        workspaceId: s.workspaceId,
+        inviterId: s.userId,
+        email: options.email,
+        role: 'MEMBER',
+        status: options.status,
+        createdAt: options.createdAt,
+        expiresAt: options.expiresAt,
       },
       select: { id: true },
     });
@@ -410,6 +438,13 @@ describe('Retention cleanup (e2e)', () => {
       });
       const activity = await insertActivity(s, new Date(now.getTime() - 400 * DAY_MS));
       const ping = await insertUsagePing(s, new Date(now.getTime() - 400 * DAY_MS));
+      const invitationCreatedAt = new Date(now.getTime() - 400 * DAY_MS);
+      const invitation = await insertInvitation(s, {
+        email: 'switched-off@test.example.com',
+        status: 'canceled',
+        createdAt: invitationCreatedAt,
+        expiresAt: new Date(invitationCreatedAt.getTime() + 2 * DAY_MS),
+      });
 
       // No `sweep()` helper here — the point is that the switch is honoured at the moment of
       // deletion, not only at registration.
@@ -420,6 +455,7 @@ describe('Retention cleanup (e2e)', () => {
         notifications: 0,
         activities: 0,
         usagePings: 0,
+        invitations: 0,
         orphanedFiles: 0,
       });
 
@@ -428,6 +464,9 @@ describe('Retention cleanup (e2e)', () => {
       expect(await prisma.notification.findUnique({ where: { id: notification } })).not.toBeNull();
       expect(await prisma.activity.findUnique({ where: { id: activity } })).not.toBeNull();
       expect(await prisma.usagePing.findUnique({ where: { id: ping } })).not.toBeNull();
+      expect(
+        await prisma.workspaceInvitation.findUnique({ where: { id: invitation } }),
+      ).not.toBeNull();
     });
   });
 
@@ -462,6 +501,152 @@ describe('Retention cleanup (e2e)', () => {
 
       expect(counts.usagePings).toBe(0);
       expect(await prisma.usagePing.findUnique({ where: { id: ancient } })).not.toBeNull();
+    });
+  });
+
+  /**
+   * The sweep added by audit finding DB-01, and the only one whose rows carry the personal data
+   * of somebody who is not a user of this instance. `WorkspaceInvitation.email` is a literal
+   * address; an invitation to a person who never signed up leaves no `User` row for account
+   * deletion to reach, so before this sweep existed nothing in the product ever removed it.
+   *
+   * Two ways to be finished — somebody answered (`status <> 'pending'`) or the clock did
+   * (`expiresAt` in the past) — and one way to be exempt: still pending, still unexpired, at any
+   * age. These tests are that predicate, against the database rather than against the SQL.
+   */
+  describe('finished invitations past the window', () => {
+    const ANCIENT = 400 * DAY_MS;
+
+    /** Two days after `createdAt`, matching what the invitation flow actually writes. */
+    function expiryFor(createdAt: Date): Date {
+      return new Date(createdAt.getTime() + 2 * DAY_MS);
+    }
+
+    it('deletes a resolved invitation older than the window and keeps a fresh one', async () => {
+      const s = await seed();
+      const now = new Date();
+      const oldCreatedAt = new Date(now.getTime() - ANCIENT);
+      const freshCreatedAt = new Date(now.getTime() - 2 * DAY_MS);
+
+      const oldAccepted = await insertInvitation(s, {
+        email: 'old-accepted@test.example.com',
+        status: 'accepted',
+        createdAt: oldCreatedAt,
+        expiresAt: expiryFor(oldCreatedAt),
+      });
+      const oldCanceled = await insertInvitation(s, {
+        email: 'old-canceled@test.example.com',
+        status: 'canceled',
+        createdAt: oldCreatedAt,
+        expiresAt: expiryFor(oldCreatedAt),
+      });
+      const oldRejected = await insertInvitation(s, {
+        email: 'old-rejected@test.example.com',
+        status: 'rejected',
+        createdAt: oldCreatedAt,
+        expiresAt: expiryFor(oldCreatedAt),
+      });
+      // Answered, but only the day before yesterday: inside the window, so still kept.
+      const freshAccepted = await insertInvitation(s, {
+        email: 'fresh-accepted@test.example.com',
+        status: 'accepted',
+        createdAt: freshCreatedAt,
+        expiresAt: expiryFor(freshCreatedAt),
+      });
+
+      // Four rows in, or none of the assertions below distinguish "deleted" from "never
+      // written" (the repo's vacuous-assertion rule).
+      expect(await prisma.workspaceInvitation.count()).toBe(4);
+
+      const counts = await sweep(now);
+
+      expect(counts.invitations).toBe(3);
+      expect(
+        await prisma.workspaceInvitation.findUnique({ where: { id: oldAccepted } }),
+      ).toBeNull();
+      expect(
+        await prisma.workspaceInvitation.findUnique({ where: { id: oldCanceled } }),
+      ).toBeNull();
+      expect(
+        await prisma.workspaceInvitation.findUnique({ where: { id: oldRejected } }),
+      ).toBeNull();
+      expect(
+        await prisma.workspaceInvitation.findUnique({ where: { id: freshAccepted } }),
+      ).not.toBeNull();
+    });
+
+    it('keeps a pending invitation that has not expired, however old the row is', async () => {
+      const s = await seed();
+      const now = new Date();
+      const createdAt = new Date(now.getTime() - ANCIENT);
+
+      // Created over a year ago and still live: an admin extended it, or the deployment sets a
+      // long expiry. It is a grant of access somebody can still accept, so age is irrelevant.
+      const stillOpen = await insertInvitation(s, {
+        email: 'still-open@test.example.com',
+        status: 'pending',
+        createdAt,
+        expiresAt: new Date(now.getTime() + 30 * DAY_MS),
+      });
+      // Same age, same `pending` status — but its expiry has passed, so nobody can act on it.
+      const abandoned = await insertInvitation(s, {
+        email: 'abandoned@test.example.com',
+        status: 'pending',
+        createdAt,
+        expiresAt: expiryFor(createdAt),
+      });
+
+      expect(await prisma.workspaceInvitation.count()).toBe(2);
+
+      const counts = await sweep(now);
+
+      expect(counts.invitations).toBe(1);
+      expect(
+        await prisma.workspaceInvitation.findUnique({ where: { id: stillOpen } }),
+      ).not.toBeNull();
+      expect(await prisma.workspaceInvitation.findUnique({ where: { id: abandoned } })).toBeNull();
+    });
+
+    it('keeps every invitation when the window is 0', async () => {
+      const s = await seed();
+      const now = new Date();
+      const createdAt = new Date(now.getTime() - 4000 * DAY_MS);
+      const ancient = await insertInvitation(s, {
+        email: 'ancient@test.example.com',
+        status: 'canceled',
+        createdAt,
+        expiresAt: expiryFor(createdAt),
+      });
+
+      expect(await prisma.workspaceInvitation.count()).toBe(1);
+
+      process.env.INVITATION_RETENTION_DAYS = '0';
+      const counts = await sweep(now);
+
+      expect(counts.invitations).toBe(0);
+      expect(
+        await prisma.workspaceInvitation.findUnique({ where: { id: ancient } }),
+      ).not.toBeNull();
+    });
+
+    it('leaves the workspace and the inviter the deleted invitation pointed at alone', async () => {
+      // `WorkspaceInvitation.inviter` is one of the seven `onDelete: Restrict` relations
+      // (ADR 0026). Deleting the invitation is the allowed direction; this is the assertion
+      // that the sweep stays on it.
+      const s = await seed();
+      const now = new Date();
+      const createdAt = new Date(now.getTime() - ANCIENT);
+      await insertInvitation(s, {
+        email: 'gone@test.example.com',
+        status: 'accepted',
+        createdAt,
+        expiresAt: expiryFor(createdAt),
+      });
+
+      await expect(sweep(now)).resolves.toMatchObject({ invitations: 1 });
+
+      expect(await prisma.user.findUnique({ where: { id: s.userId } })).not.toBeNull();
+      expect(await prisma.workspace.findUnique({ where: { id: s.workspaceId } })).not.toBeNull();
     });
   });
 

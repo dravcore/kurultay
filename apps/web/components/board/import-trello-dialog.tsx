@@ -4,6 +4,7 @@ import { useId, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { TrelloImportReportDto } from '@kurul/shared-types';
 import { api, resolveApiMessage } from '@/lib/api';
+import { SubmitError } from '@/components/common/submit-error';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -132,7 +133,7 @@ function ImportTrelloDialogBody({
         <p className="text-small text-muted-foreground">{t('duplicateWarning')}</p>
         <p className="text-small text-muted-foreground">{t('slowWarning')}</p>
 
-        {error ? <p className="text-body text-destructive">{error}</p> : null}
+        {error ? <SubmitError message={error} /> : null}
         {pending ? (
           <p className="text-small text-foreground" role="status">
             {t('pending')}

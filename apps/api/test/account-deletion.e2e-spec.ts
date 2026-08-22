@@ -13,6 +13,7 @@ import {
   createWorkspace,
   signUp,
   uniqueEmail,
+  uniqueSuffix,
   type TestUser,
 } from './helpers/auth';
 import { resetDatabase } from './helpers/db';
@@ -73,7 +74,7 @@ describe('Account deletion and anonymisation (e2e)', () => {
    * The workspace has a second OWNER, so nothing here needs a disposition — the owned-workspace
    * question has its own tests below.
    */
-  async function seedContentfulUser(): Promise<{
+  async function seedContentfulUser(options?: { departingEmail?: string }): Promise<{
     departing: TestUser;
     departingId: string;
     keeper: TestUser;
@@ -87,7 +88,10 @@ describe('Account deletion and anonymisation (e2e)', () => {
     pendingInvitationId: string;
   }> {
     const keeper = await signUp(app, { name: 'Keeper' });
-    const departing = await signUp(app, { name: 'Ada Lovelace' });
+    const departing = await signUp(app, {
+      name: 'Ada Lovelace',
+      ...(options?.departingEmail === undefined ? {} : { email: options.departingEmail }),
+    });
     const keeperId = await userId(keeper);
     const departingId = await userId(departing);
 
@@ -530,6 +534,205 @@ describe('Account deletion and anonymisation (e2e)', () => {
       const kept = await prisma.workspaceInvitation.findUnique({ where: { id: accepted.id } });
       expect(kept?.inviterId).toBe(seed.departingId);
     });
+
+    /**
+     * The invitee side of `WorkspaceInvitation`, and the half anonymisation cannot reach
+     * (audit finding DB-01).
+     *
+     * `email` is a literal address in a column of its own — nothing about it is derived from
+     * `User` — so rewriting the `User` row to `deleted-<id>@deleted.invalid` leaves every
+     * invitation ever *sent to* this person still spelling out where they can be reached. The
+     * inviter-side rule above ("pending only") is deliberately not the rule here: an accepted
+     * invitation addressed to the departing user is not somebody else's record of an event, it
+     * is a copy of the departing user's own contact details.
+     *
+     * Every fixture is written in the casing the column actually stores. Better Auth's
+     * `create-invitation` route lower-cases the address before it is written and
+     * `WorkspaceInvitationService.createInvitation` lower-cases it again on the way in, so a
+     * mixed-case row is not a state this table reaches — see the next test for what asking the
+     * database to be case-insensitive about it instead would cost.
+     */
+    it('removes every invitation addressed to the departing user, in any state', async () => {
+      const seed = await seedContentfulUser();
+      const address = seed.departing.email;
+
+      const invitedRows = await Promise.all(
+        (
+          [
+            // The one they accepted to get here: a record whose only remaining content is the
+            // address.
+            { status: 'accepted', email: address },
+            // Still open — an offer nobody answered.
+            { status: 'pending', email: address },
+            // They said no — and the address is still sitting there.
+            { status: 'rejected', email: address },
+            // An admin took it back, and the address outlived the invitation entirely.
+            { status: 'canceled', email: address },
+          ] as const
+        ).map((row) =>
+          prisma.workspaceInvitation.create({
+            data: {
+              email: row.email,
+              inviterId: seed.keeperId,
+              workspaceId: seed.workspaceId,
+              role: MemberRole.MEMBER,
+              status: row.status,
+              expiresAt: new Date(Date.now() + 86_400_000),
+            },
+            select: { id: true },
+          }),
+        ),
+      );
+      // Four rows in, or "none left afterwards" is a claim about an empty table.
+      expect(invitedRows).toHaveLength(4);
+      expect(await prisma.workspaceInvitation.count({ where: { email: address } })).toBe(4);
+
+      await seed.departing.agent
+        .delete('/me')
+        .send({ confirmEmail: seed.departing.email })
+        .expect(204);
+
+      // The address is gone from the table.
+      const survivors = await prisma.workspaceInvitation.findMany({
+        where: { email: address },
+        select: { id: true },
+      });
+      expect(survivors).toHaveLength(0);
+
+      // ...and nothing anywhere else in the table carries it either — the assertion that would
+      // still catch a predicate narrowed to one workspace or one status.
+      const all = await prisma.workspaceInvitation.findMany({ select: { email: true } });
+      for (const row of all) {
+        expect(row.email.toLowerCase()).not.toBe(address.toLowerCase());
+      }
+    });
+
+    /**
+     * The delete above matches an address, and an address is not a pattern.
+     *
+     * This started as `email: { equals: user.email, mode: 'insensitive' }`, which Prisma
+     * compiles to `ILIKE` on PostgreSQL with the operand passed through unescaped. `_` and `%`
+     * are legal in a local part and are also the two `LIKE` wildcards, so a departing
+     * `wildcard_…@test.example.com` silently widened its own erasure into `wildcard-…`,
+     * `wildcardX…`, and anything else of the same length — in **every** workspace on the
+     * instance, since the predicate is deliberately not workspace-scoped. One person exercising
+     * their right to erasure would have revoked strangers' live invitations in tenants they had
+     * never heard of, and the API would have answered `204`.
+     *
+     * So the decoy here is not a near-miss for tidiness: it is a *pending, unexpired* invitation
+     * in a different workspace, sent by a different person, whose only relationship to the
+     * departing user is that one character of the address differs. It has to survive.
+     */
+    it('matches the departing address literally — "_" in it is not a wildcard', async () => {
+      const seed = await seedContentfulUser({
+        departingEmail: `wildcard_${uniqueSuffix()}@test.example.com`,
+      });
+      const address = seed.departing.email;
+      // The premise of the whole test: without the underscore there is no wildcard to mistake.
+      expect(address).toContain('_');
+
+      // Somebody else entirely. Under `ILIKE`, `_` matches this row's `-`.
+      const stranger = address.replace('_', '-');
+      expect(stranger).not.toBe(address);
+
+      const otherWorkspace = await createWorkspace(seed.keeper.agent, 'Elsewhere', 'elsewhere');
+
+      const [ownRow, strangerRow] = await Promise.all([
+        prisma.workspaceInvitation.create({
+          data: {
+            email: address,
+            inviterId: seed.keeperId,
+            workspaceId: seed.workspaceId,
+            role: MemberRole.MEMBER,
+            status: 'pending',
+            expiresAt: new Date(Date.now() + 86_400_000),
+          },
+          select: { id: true },
+        }),
+        prisma.workspaceInvitation.create({
+          data: {
+            email: stranger,
+            inviterId: seed.keeperId,
+            workspaceId: otherWorkspace.id,
+            role: MemberRole.MEMBER,
+            status: 'pending',
+            expiresAt: new Date(Date.now() + 86_400_000),
+          },
+          select: { id: true },
+        }),
+      ]);
+
+      // Both sides counted before the delete, or "the stranger's row survived" could be a claim
+      // about a row that was never written and "the user's rows are gone" a claim about an
+      // empty table.
+      expect(await prisma.workspaceInvitation.count({ where: { email: address } })).toBe(1);
+      expect(await prisma.workspaceInvitation.count({ where: { email: stranger } })).toBe(1);
+
+      await seed.departing.agent
+        .delete('/me')
+        .send({ confirmEmail: seed.departing.email })
+        .expect(204);
+
+      // The erasure did its own job...
+      expect(await prisma.workspaceInvitation.count({ where: { email: address } })).toBe(0);
+      expect(await prisma.workspaceInvitation.findUnique({ where: { id: ownRow.id } })).toBeNull();
+
+      // ...and stopped at the edge of it. This is the assertion the `ILIKE` predicate failed.
+      const survivor = await prisma.workspaceInvitation.findUnique({
+        where: { id: strangerRow.id },
+      });
+      expect(survivor).not.toBeNull();
+      expect(survivor?.email).toBe(stranger);
+      expect(survivor?.status).toBe('pending');
+      expect(survivor?.workspaceId).toBe(otherWorkspace.id);
+    });
+
+    /**
+     * The same wildcard risk as the invitation sweep above, on the other `contains` this flow
+     * runs: `Verification.identifier` is swept with plain `contains` (no `mode`), which Prisma
+     * compiles to the same unescaped `LIKE` on Postgres — confirmed empirically, see
+     * `escapeLikePattern`'s doc comment. A departing address containing `_` would otherwise
+     * delete a stranger's live verification row too.
+     */
+    it('matches the departing address literally in the Verification sweep — "_" is not a wildcard', async () => {
+      const seed = await seedContentfulUser({
+        departingEmail: `otpwild_${uniqueSuffix()}@test.example.com`,
+      });
+      const address = seed.departing.email;
+      expect(address).toContain('_');
+
+      // Under an unescaped `ILIKE`, `_` matches this row's `-`.
+      const stranger = address.replace('_', '-');
+      expect(stranger).not.toBe(address);
+
+      const [ownRow, strangerRow] = await Promise.all([
+        prisma.verification.create({
+          data: { identifier: address, value: 'own', expiresAt: new Date(Date.now() + 600_000) },
+          select: { id: true },
+        }),
+        prisma.verification.create({
+          data: {
+            identifier: stranger,
+            value: 'stranger',
+            expiresAt: new Date(Date.now() + 600_000),
+          },
+          select: { id: true },
+        }),
+      ]);
+
+      await seed.departing.agent
+        .delete('/me')
+        .send({ confirmEmail: seed.departing.email })
+        .expect(204);
+
+      expect(await prisma.verification.findUnique({ where: { id: ownRow.id } })).toBeNull();
+
+      // The assertion the unescaped predicate failed: a row that only matches the pattern, not
+      // the address, survives.
+      const survivor = await prisma.verification.findUnique({ where: { id: strangerRow.id } });
+      expect(survivor).not.toBeNull();
+      expect(survivor?.identifier).toBe(stranger);
+    });
   });
 
   describe('a workspace the user solely owns', () => {
@@ -727,7 +930,7 @@ describe('Account deletion and anonymisation (e2e)', () => {
         .send({ confirmEmail: seed.departing.email })
         .expect(204);
 
-      // Better Auth's cookie cache can still present this session for up to five minutes, so
+      // Better Auth's cookie cache can still present this session for up to 60 seconds, so
       // the two writes that are not workspace-scoped refuse it explicitly (ADR 0026).
       await seed.departing.agent
         .post('/workspaces')
@@ -781,6 +984,9 @@ describe('Account deletion and anonymisation (e2e)', () => {
     it('lets a named instance administrator execute a request for somebody who cannot', async () => {
       const seed = await seedContentfulUser();
       process.env[INSTANCE_ADMIN_EMAILS_ENV] = seed.keeper.email;
+      // `InstanceAdminGuard` requires `emailVerified` as well as list membership — a real
+      // operator's account has been through mailbox verification (see the guard's doc comment).
+      await confirmEmail(app, prisma, seed.keeper);
 
       const previewResponse = await seed.keeper.agent
         .get(`/instance/users/${seed.departingId}/deletion-preview`)
@@ -808,6 +1014,7 @@ describe('Account deletion and anonymisation (e2e)', () => {
     it('answers 404 for an account that has already been deleted', async () => {
       const seed = await seedContentfulUser();
       process.env[INSTANCE_ADMIN_EMAILS_ENV] = seed.keeper.email;
+      await confirmEmail(app, prisma, seed.keeper);
 
       await seed.keeper.agent
         .delete(`/instance/users/${seed.departingId}`)

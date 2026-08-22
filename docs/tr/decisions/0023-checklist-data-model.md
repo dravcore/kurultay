@@ -14,8 +14,8 @@ semantiği olan ayrı bir karttır. İkisini tek geçişte inşa etmek board DnD
 dokunurdu, oysa bu kalem için ayrılan pencere altı gün. İkisine de sessizce hizmet etmeye
 çalışan bir veri modeli, bu pencerenin gerçekten teslim edebileceğini eksik bırakırdı.
 
-Rekabet baskısı genel değil, spesifik. `docs/roadmap.md`'nin Beyond MVP bölümü ve Faz 3'ü
-planlayan denetim, bir ekibin board'unu Trello'dan taşımadan önce sorduğu aynı üç soruda
+Rekabet baskısı genel değil, spesifik. [ROADMAP.md](../../../ROADMAP.md)'nin Beyond MVP bölümü ve
+Faz 3'ü planlayan denetim, bir ekibin board'unu Trello'dan taşımadan önce sorduğu aynı üç soruda
 birleşiyor: board'larımı getirebiliyor muyum, kartlara dosya koyabiliyor muyum, checklist'im var
 mı. Aynı ROADMAP'in bir sonraki kalemi, Trello import, birinci soruyu cevaplıyor — ve bir Trello
 board'unun checklist'i zaten çoklu-liste: bir kart birden çok adlandırılmış checklist taşıyabilir,
@@ -38,10 +38,10 @@ uzun görev, pointer-move frame'i başına 2,6 ms, 3.854 DOM düğümü. Liste s
 satırları çeken bir checklist modeli, bir checklist'in daha on maddesi bile olmadan bu emeği
 yapısı gereği geri alır.
 
-Aynı karar zaten iki kez verilecekti: `docs/phase-3-plan.md` §4.1b, attachments'ın (P3-1) aynı
-realtime çağrısına ihtiyaç duyduğunu — yeni bir event tipi mi, `task:updated`'a mı binecek —
-şimdiden not ediyor ve kararı ikisinden hangisi önce teslim ederse ona bırakıyor. Bu ADR, o ilk
-karardır.
+Aynı karar zaten iki kez verilecekti: faz-3 planı (bugün [ROADMAP.md](../../../ROADMAP.md)'ye
+katlanmış durumda), attachments'ın (P3-1) aynı realtime çağrısına ihtiyaç duyduğunu — yeni bir
+event tipi mi, `task:updated`'a mı binecek — önceden not etmişti ve kararı ikisinden hangisi önce
+teslim ederse ona bırakıyordu. Bu ADR, o ilk karardır.
 
 ## Karar
 

@@ -1,4 +1,4 @@
-import { buildInviteAcceptUrl, resolveVerificationUrl, webAppUrl } from './web-urls';
+import { buildInviteAcceptUrl, buildTaskUrl, resolveVerificationUrl, webAppUrl } from './web-urls';
 
 const VERIFY_BASE = 'http://localhost:4000/auth/verify-email?token=a-jwt';
 
@@ -69,6 +69,14 @@ describe('web app URLs', () => {
 
     it('returns a non-URL untouched rather than dropping the email', () => {
       expect(resolveVerificationUrl('not a url')).toBe('not a url');
+    });
+  });
+
+  describe('buildTaskUrl', () => {
+    it('points at the card under its board on the web app', () => {
+      expect(buildTaskUrl('board-1', 'task-1')).toBe(
+        'https://app.example.test/board/board-1/task/task-1',
+      );
     });
   });
 });

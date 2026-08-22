@@ -72,6 +72,15 @@ services:
     # privilege via the setuid()/setgid() syscalls under an already-held capability, not by
     # exec'ing a setuid-bit binary, so there is nothing for no-new-privileges to block.
     cap_add: [CHOWN, FOWNER, SETUID, SETGID, DAC_OVERRIDE]
+    # OPS-05 (2026-08-18 audit): no service in this file carried a memory ceiling, so the
+    # *kernel* OOM killer — not this file — decided which process died when a host approached
+    # docs/self-hosting.md's "2 CPUs / 2 GB" budget, and it scores every process on the host, not
+    # just this stack's; it has no reason to spare postgres over whichever container actually
+    # grew. `mem_limit` puts that decision back where it belongs: this container is only ever
+    # killed for outgrowing its own 512m, and nothing another service does can take postgres down
+    # with it. See docs/self-hosting.md#server-sizing for how this and the other ceilings below
+    # add up against that budget.
+    mem_limit: 512m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-kurul}
       # No baked-in default: compose fails loudly instead of initializing (or, on every later
@@ -125,6 +134,11 @@ services:
     # regression — `DB saved on disk` at shutdown, `Done loading RDB, keys loaded: 1` on the
     # next boot, value intact after `GET`, capability set never touching DAC_OVERRIDE.
     cap_add: [SETUID, SETGID]
+    # OPS-05 (2026-08-18 audit) — see postgres's mem_limit above for why a ceiling exists at all.
+    # 128m: this instance holds cache entries, sessions, rate-limit counters and the notification
+    # queue (see REDIS_PASSWORD below), never board data, so its working set is small and bounded
+    # by what the app puts in it rather than by request-sized client input the way api's is.
+    mem_limit: 128m
     environment:
       # Optional, unlike POSTGRES_PASSWORD above: this Redis instance holds cache entries,
       # sessions, rate-limit counters and the notification queue — no board data (see
@@ -184,6 +198,11 @@ services:
     # baseline. Verified by running the image standalone against a live postgres with
     # `cap_drop: [ALL]` and no `cap_add`: `backup.sh once` wrote a valid non-empty dump
     # file and exited 0.
+    # OPS-05 (2026-08-18 audit) — see postgres's mem_limit above for why a ceiling exists at all.
+    # 256m: `pg_dump -Fc` streams its output rather than buffering the whole archive in memory
+    # (see backup.sh), so this covers process overhead plus headroom for the `tar` this container
+    # also runs over attachment_data — not the size of either archive on disk.
+    mem_limit: 256m
     environment:
       # postgres:5432 is the in-network address, same as the api/migrate services above —
       # unrelated to the host .env DATABASE_URL used by the dev loop.
@@ -217,22 +236,79 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # OPS-02 (audit/findings/devops.md, 2026-08-18 audit): backup.sh's main loop runs
+    # `take_dump || true` / `take_files || true` (see there) so ONE failing cycle only logs
+    # and keeps sleeping — the process itself never exits non-zero, and without this block
+    # nothing about the container's state changed either. A dump could stop being produced
+    # entirely and `docker compose ps` would carry on reporting this service as simply "Up".
+    # RPO grows unbounded and nothing outside the container's own logs says so — exactly the
+    # gap the retention sweep's grace window (`BACKUP_KEEP × BACKUP_INTERVAL`,
+    # apps/api/src/retention/cleanup.worker.ts) quietly assumes never happens.
+    #
+    # "Healthy" = a `kurul-*.dump` in /backups modified within the last 2×BACKUP_INTERVAL
+    # seconds. 2×, not 1×, so one slow or skipped cycle (a big `pg_dump`, or postgres
+    # restarting underneath it — both already survived by the `|| true` above) doesn't flap
+    # this healthy → unhealthy → healthy every single interval; it takes a SECOND missed
+    # cycle in a row to actually mean something is stuck.
+    #
+    # `find -mmin`, not GNU `find -newermt`: this image is postgres:18-alpine, whose `find`
+    # is BusyBox's and has no `-newermt`/`-newermin` at all — confirmed with
+    # `docker run --rm postgres:18-alpine find --help`. `-mmin` (BusyBox has this one) takes
+    # whole minutes, hence the `* 2 + 59) / 60` ceiling and the `-lt 1` floor so a small
+    # BACKUP_INTERVAL (e.g. an integration test running this service with BACKUP_INTERVAL=5)
+    # can never round down to `-mmin -0`, which BusyBox reads as "modified in the last zero
+    # minutes" and would never match anything, ever.
+    #
+    # $BACKUP_INTERVAL is this container's own environment variable, set two keys above from
+    # `${BACKUP_INTERVAL:-86400}` — Compose bakes that default in at `docker compose config`
+    # time regardless of whether an operator's `.env` sets it, so the value this check reads
+    # at runtime always matches what backup.sh itself is sleeping for. Every `$` below is
+    # doubled (`$$`) because this whole command is interpreted by the CONTAINER's shell, not
+    # by Compose's interpolation of this file — the same escaping `redis`'s healthcheck above
+    # uses for `$REDIS_PASSWORD`, for the identical reason.
+    #
+    # Pruning (`prune()` in backup.sh, keeps the newest BACKUP_KEEP of each series) cannot
+    # make a healthy instance look unhealthy: it only ever deletes the OLDEST matching files,
+    # never the newest, so the one file `-mmin` looks at survives every prune pass right up
+    # until the whole series has actually gone stale — which is exactly the condition this
+    # check exists to surface.
+    #
+    # `start_period` is deliberately NOT scaled to BACKUP_INTERVAL. The very first dump
+    # starts immediately at container boot (see backup.sh's main loop below `mkdir -p
+    # "$BACKUP_DIR"`), not after one BACKUP_INTERVAL has elapsed, so how long it takes is a
+    # function of database size, not of the configured cadence — sizing it off a 24h default
+    # would hide a genuinely broken first cycle for most of a day. 10 minutes is generous for
+    # the databases a single-host Compose install runs (this file's whole premise, and
+    # self-hosting.md's); an instance with an unusually large first dump that still needs
+    # longer can raise `start_period` with a compose override file, same as any other
+    # deployment-specific tuning in this project, rather than a knob added here pre-emptively.
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'mmin=$$(( ($$BACKUP_INTERVAL * 2 + 59) / 60 )); [ "$$mmin" -lt 1 ] && mmin=1; find /backups -maxdepth 1 -name "kurul-*.dump" -mmin "-$$mmin" 2>/dev/null | grep -q .',
+        ]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
 
   # One-shot: applies pending Prisma migrations, then exits. `api` waits for it to finish
   # successfully before starting, so the schema is never missing on first boot.
   #
-  # `build:` only, deliberately no `image:` fallback pair like api/web below: OPS-04
-  # (audit/findings/devops.md) scopes GHCR publishing to the two long-running services, and
-  # `.github/workflows/release-images.yml` only builds `runner` targets, not this Dockerfile's
-  # `migrate` stage. A source build still runs on every `docker compose up -d` for this one
-  # service — it reuses the same `build` stage the `api` image already paid for above it in
-  # the Dockerfile, ~45-50s uncached, so it does not fully deliver a build-free install on its
-  # own. It does not block the ≤5-minute pull-based install target either (that budget has
-  # headroom for one 45-50s build), and the `migrate` container's own logs make it obvious
-  # when this is what's happening, unlike a silent full rebuild of api or web would be. A
-  # published `kurul-migrate` image is a reasonable next step if this ever needs to shrink
-  # further, not something this fix requires.
+  # `image:` + `build:` fallback pair, same as api/web below. This service used to be
+  # `build:`-only (OPS-04 scoped GHCR publishing to the two long-running services), and that
+  # scoping broke the curl-based install in docs/self-hosting.md outright: that path downloads
+  # no source tree, so a service that can only build never starts, and `api`
+  # (`service_completed_successfully` below) never comes up with it — audit finding OPS-01.
+  # `ghcr.io/dravcore/kurul-migrate` is published by `.github/workflows/release-images.yml`
+  # starting with the first release *after* v0.2.0: on v0.2.0 and older tags the pull fails
+  # for this image, and the git-clone install path (docs/self-hosting.md#troubleshooting) is
+  # the one that works. `build:` stays so a source checkout keeps working exactly as before —
+  # an explicit `docker compose build` (or an unresolvable tag) still builds this Dockerfile's
+  # `migrate` stage locally.
   migrate:
+    image: ghcr.io/dravcore/kurul-migrate:${TAG:-latest}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -249,6 +325,11 @@ services:
     # reads files it does not own, so nothing about it ever needed root. Verified by bringing
     # the stack up with `cap_drop: [ALL]` and no `cap_add`: all 19 migrations applied and the
     # container exited 0.
+    # OPS-05 (2026-08-18 audit) — see postgres's mem_limit above for why a ceiling exists at all.
+    # 512m matches api's below: this reuses the same `build` stage and the same `prisma`
+    # machinery api's client is generated from, just once at startup rather than for the
+    # container's whole life, so there is no reason to size it any lower.
+    mem_limit: 512m
     environment:
       # postgres:5432 (not localhost) — this is the in-network address, unrelated to
       # whatever DATABASE_URL a developer has in their host .env for the dev loop.
@@ -284,7 +365,20 @@ services:
     # half) and never chowns, binds a privileged port, or otherwise needs a capability the
     # kernel doesn't hand every process by default. Verified: full stack up with `cap_drop:
     # [ALL]` and no `cap_add`, `/health/ready` → 200.
+    # OPS-05 (2026-08-18 audit) — see postgres's mem_limit above for why a ceiling exists at all.
+    # 512m: REQUEST_BODY_MAX_BYTES and ATTACHMENT_MAX_BYTES (.env.example) both buffer request
+    # data into this process's heap, so a burst of concurrent requests near those ceilings is the
+    # likeliest source of unbounded growth in this container. NODE_OPTIONS below pins V8's
+    # old-space heap to 384m (75% of this limit) instead of leaving it to Node's own
+    # container-memory heuristic, so the remaining 128m of headroom is there for everything a
+    # heap ceiling alone doesn't cover — thread stacks, native buffers, code space — and V8 hits
+    # its own catchable "JavaScript heap out of memory" before the cgroup's hard limit does,
+    # which shows up as a message in `docker compose logs api` rather than a bare SIGKILL.
+    mem_limit: 512m
     environment:
+      # See the mem_limit comment above for why this is set explicitly rather than left to
+      # Node's default container-memory heuristic.
+      NODE_OPTIONS: --max-old-space-size=384
       # postgres:5432 / redis:6379 are the in-network addresses; they're intentionally not
       # sourced from the host .env, whose DATABASE_URL/REDIS_URL point at localhost for the
       # dev-loop run mode (docs/development.md#run-modes) and would not resolve in-container.
@@ -357,6 +451,18 @@ services:
       # produces a 413 logged as a successful proxied request in one direction and logged
       # nowhere at all in the other (ADR 0022, ADR 0024).
       ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-26214400}
+      # Storage quotas (docs/decisions/0027-attachment-quotas.md): summed FILE bytes per
+      # workspace and instance-wide. Blank = the API's defaults (2 GiB per workspace, 20 GiB per
+      # instance); 0 = unlimited. Passed through for the same reason every other limit here is:
+      # a ceiling that silently ignores its own variable is worse than one nobody can change.
+      # See .env.example for sizing the instance one: this volume shares a disk budget with
+      # everything else on the host, Postgres included.
+      ATTACHMENT_WORKSPACE_QUOTA_BYTES: ${ATTACHMENT_WORKSPACE_QUOTA_BYTES:-}
+      ATTACHMENT_INSTANCE_QUOTA_BYTES: ${ATTACHMENT_INSTANCE_QUOTA_BYTES:-}
+      # Per-IP upload byte budget per minute. Blank = 256 MiB; 0 = off. Keyed by the same
+      # client IP as the request throttles, so it needs the TRUST_PROXY line above to see
+      # through Caddy; counters live in Redis and fall back to process memory if Redis errors.
+      ATTACHMENT_UPLOAD_BYTES_PER_MINUTE: ${ATTACHMENT_UPLOAD_BYTES_PER_MINUTE:-}
       # The Trello importer's own ceiling, passed through for the same reason
       # REQUEST_BODY_MAX_BYTES above is: a limit that silently ignores its own variable is worse
       # than one nobody can change. It measures heap rather than disk and is unrelated to
@@ -439,7 +545,15 @@ services:
     # node` and the Next.js standalone server needs nothing beyond the default-safe
     # baseline. Verified: full stack up with `cap_drop: [ALL]` and no `cap_add`, web
     # healthcheck reports healthy.
+    # OPS-05 (2026-08-18 audit) — see postgres's and api's mem_limit comments above for the
+    # reasoning and the same 512m / 384m split. Next.js SSR does less request buffering than the
+    # API, but the same "Node's own container-memory heuristic isn't a ceiling anyone chose"
+    # problem applies equally, so it gets the same explicit one.
+    mem_limit: 512m
     environment:
+      # See the mem_limit comment above for why this is set explicitly rather than left to
+      # Node's default container-memory heuristic.
+      NODE_OPTIONS: --max-old-space-size=384
       # The one address the *server* half of Next.js uses — middleware's session probe and the
       # locale lookup during a render. It has to be absolute (a `/api` prefix has no origin to
       # resolve against inside Node) and it is deliberately the container-network address, not
@@ -497,6 +611,11 @@ services:
     # `docker top` (`root … caddy run --config /etc/caddy/Caddyfile`) rather than
     # `docker exec … id`, which reports the exec session's user and not PID 1's.
     cap_add: [NET_BIND_SERVICE]
+    # OPS-05 (2026-08-18 audit) — see postgres's mem_limit above for why a ceiling exists at all.
+    # 128m: Caddy terminates TLS and proxies to two backend services with no application logic of
+    # its own — request and attachment bodies pass through it rather than buffering into it the
+    # way api's do — so this is process overhead plus connection buffers, not request-sized.
+    mem_limit: 128m
     environment:
       # The public origin, scheme included — `http://localhost` (the default) for a local
       # stack with no domain, `https://kurul.example.com` to switch automatic HTTPS on.

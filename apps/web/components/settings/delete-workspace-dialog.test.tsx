@@ -131,4 +131,16 @@ describe('DeleteWorkspaceDialog', () => {
     expect(screen.queryByText('server wording, never shown')).toBeNull();
     expect(routerReplace).not.toHaveBeenCalled();
   });
+
+  it('announces the failed deletion to assistive tech and moves focus to it', async () => {
+    apiDelete.mockRejectedValue(apiFailure(403));
+    renderDialog();
+
+    fireEvent.change(confirmField(), { target: { value: workspace.name } });
+    fireEvent.click(deleteButton());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(copy.deleteErrorForbidden);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
 });

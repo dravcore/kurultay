@@ -9,6 +9,12 @@ const DEFAULT_WEB_URL = 'http://localhost:3000';
 const INVITE_PATH = '/invite';
 
 /**
+ * Web route of one card, read under its board.
+ * Owned by `apps/web/app/(app)/board/[boardId]/task/[taskId]/page.tsx`.
+ */
+const BOARD_PATH = '/board';
+
+/**
  * Web route a verification link lands on when the caller did not name one.
  * Owned by `apps/web` — see the contract in
  * `docs/decisions/0013-invitation-email-verification.md`.
@@ -74,4 +80,14 @@ export function resolveVerificationUrl(verificationUrl: string): string {
       : callback;
   url.searchParams.set('callbackURL', `${webAppUrl()}${path}`);
   return url.toString();
+}
+
+/**
+ * The page a notification email links to: the card, opened on its board.
+ *
+ * Defined here next to the invitation link for the same reason: the route is the web's, and
+ * the API side should spell it in exactly one place.
+ */
+export function buildTaskUrl(boardId: string, taskId: string): string {
+  return `${webAppUrl()}${BOARD_PATH}/${boardId}/task/${taskId}`;
 }

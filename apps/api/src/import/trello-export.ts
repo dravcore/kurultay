@@ -6,9 +6,11 @@ import { TrelloImportScope, TrelloImportSkipReason } from '@kurul/shared-types';
  * a Trello board carries well over a hundred fields, and typing all of them would turn every
  * upstream schema change into a compile error, including changes to fields nothing here reads.
  *
- * **None of these names was verified against a real Trello export.** No real export was available
- * when this was written (`apps/api/test/fixtures/trello/README.md`), so every name below came from
- * memory. That is the reason this file reports rather than throws — see `parseTrelloExport`.
+ * **These names were written from memory and checked against two real Trello exports on
+ * 2026-08-22** (`apps/api/test/fixtures/trello/real/`, diffs in
+ * `apps/api/test/fixtures/trello/README.md#field-mapping-diffs`) — with no diff found on any
+ * field below. That is one date and two boards, not a guarantee about Trello's schema going
+ * forward, which is why this file still reports rather than throws — see `parseTrelloExport`.
  */
 export interface TrelloExport {
   name: string;
@@ -365,10 +367,11 @@ function countMembers(raw: unknown, issues: TrelloReadIssue[]): number {
  * Bytes to a narrowed export plus a list of everything that could not be read.
  *
  * **The contract is "I report what I do not know", not "I know Trello's schema."** Every field
- * name in this file was written from memory and checked against no real export
- * (`apps/api/test/fixtures/trello/README.md`), so a reader that threw on anything unexpected would
- * turn the first schema drift into a total failure. Instead: a field of an unexpected type, an
- * entry that cannot be represented, or a whole section that is missing lands in `issues` as a
+ * name in this file was written from memory and has since been checked against two real exports
+ * (`apps/api/test/fixtures/trello/README.md#field-mapping-diffs`), but Trello's schema carries no
+ * version field and no changelog, so a reader that threw on anything unexpected would still turn
+ * the next schema drift into a total failure. Instead: a field of an unexpected type, an entry
+ * that cannot be represented, or a whole section that is missing lands in `issues` as a
  * `(scope, reason)` pair and reading continues.
  *
  * Exactly two things are errors, and both mean "this is not the file you think it is" rather than

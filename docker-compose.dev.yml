@@ -1,3 +1,23 @@
+# OPS-04 (2026-08-18 audit): without this, Compose derives the project name from the checkout's
+# directory — usually `kurul` — which is exactly the name docker-compose.yml (no `name:` of its
+# own) also falls back to. Same project means same container and volume names for every service
+# both files define: `postgres`, `redis`, `postgres_data`, `redis_data`. Two failure modes came
+# from that, not one — `docker compose -f docker-compose.dev.yml down -v` (the documented way to
+# reset a local database, docs/development.md#database-workflow) dropped the full stack's
+# Postgres/Redis volumes too if `docker compose up -d` (no `-f`) had ever been run from the same
+# directory, and running the full stack afterward silently recreated the dev loop's `postgres`
+# container from docker-compose.yml's definition, which publishes no host port — `localhost:5432`
+# just stops answering, with nothing in any log naming why. `name: kurul-dev` below gives this
+# file its own project, so its containers and volumes (`kurul-dev_postgres_data`, …) are
+# namespaced apart from the full stack's `kurul_*` ones: `up`/`down`/`down -v` on one file can
+# never create, recreate, or drop anything the other owns, and both can run at once. This is a
+# one-time rename for anyone with an existing dev-loop database under the old shared name — its
+# containers/volumes are simply orphaned, not migrated; recreate with `pnpm bootstrap` (the dev
+# database has always been throwaway by design, see "Full stack in Docker" in
+# docs/development.md). scripts/bootstrap.mjs needed no change: it already invokes compose with
+# only `-f`, never `-p`, so it picks up this project name automatically.
+name: kurul-dev
+
 # Same rotation policy as docker-compose.yml (see there for the full reasoning), and applied
 # here for the same reason it is applied there: every service in this file carries
 # `restart: unless-stopped`, so these are the containers a developer starts once and leaves
@@ -85,7 +105,7 @@ services:
   # verification links and invitation mail from the web UI instead of a real inbox — see
   # docs/development.md#smtp-and-mailpit.
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.31.0@sha256:c96991d9bef73594c246d89ca81411d4e916f03e76a7d2d72fa2ab5dd3c9ce24
     restart: unless-stopped
     logging: *logging
     <<: *hardened
@@ -107,6 +127,10 @@ services:
       timeout: 5s
       retries: 10
 
+# Project-scoped by `name: kurul-dev` at the top of this file, so these resolve to
+# `kurul-dev_postgres_data` / `kurul-dev_redis_data` / `kurul-dev_mailpit_data` — distinct from
+# docker-compose.yml's own `postgres_data`/`redis_data` (`kurul_*`, or whatever your checkout's
+# directory is named). See the OPS-04 comment above for why that separation exists.
 volumes:
   postgres_data:
   redis_data:
